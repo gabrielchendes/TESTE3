@@ -1,0 +1,6 @@
+{
+  "name": "Premium App",
+  "description": "Área de membros exclusiva com conteúdos premium.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

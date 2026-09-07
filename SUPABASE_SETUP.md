@@ -1,0 +1,924 @@
+# Configuração do Supabase - Maternidade Premium
+
+Copie e cole o código abaixo no **SQL Editor** do seu projeto Supabase para criar todas as tabelas, políticas e triggers necessárias.
+
+```sql
+-- 0. Tabela `tenants` (Multi-tenancy)
+CREATE TABLE IF NOT EXISTS public.tenants (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name TEXT NOT NULL,
+    subdomain TEXT UNIQUE NOT NULL,
+    logo_url TEXT,
+    primary_color TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 1. Tabela `app_settings` (Configurações Globais)
+CREATE TABLE IF NOT EXISTS public.app_settings (
+    id BIGINT PRIMARY KEY DEFAULT 1,
+    admin_email TEXT DEFAULT 'gabrielchendes@gmail.com',
+    app_name TEXT DEFAULT 'Minha Plataforma',
+    app_description TEXT DEFAULT 'Acesse sua área exclusiva.',
+    primary_color TEXT DEFAULT '#ef4444',
+    secondary_color TEXT DEFAULT '#dc2626',
+    background_color TEXT DEFAULT '#0f0f0f',
+    logo_url TEXT,
+    favicon_url TEXT,
+    pwa_icon_url TEXT,
+    ga4_tag_id TEXT,
+    support_whatsapp TEXT DEFAULT '5500000000000',
+    support_email TEXT DEFAULT 'suporte@seudominio.com',
+    support_whatsapp_message TEXT DEFAULT 'Olá, gostaria de tirar uma dúvida sobre o curso.',
+    auth_method TEXT DEFAULT 'passwordless',
+    show_support_login BOOLEAN DEFAULT true,
+    show_support_app BOOLEAN DEFAULT true,
+    support_whatsapp_enabled BOOLEAN DEFAULT true,
+    support_email_enabled BOOLEAN DEFAULT true,
+    support_whatsapp_floating_enabled BOOLEAN DEFAULT true,
+    support_whatsapp_floating_community_enabled BOOLEAN DEFAULT true,
+    support_whatsapp_floating_profile_enabled BOOLEAN DEFAULT true,
+    support_whatsapp_floating_course_enabled BOOLEAN DEFAULT true,
+    support_whatsapp_home_enabled BOOLEAN DEFAULT true,
+    support_email_home_enabled BOOLEAN DEFAULT true,
+    support_whatsapp_community_enabled BOOLEAN DEFAULT true,
+    support_email_community_enabled BOOLEAN DEFAULT true,
+    support_whatsapp_profile_enabled BOOLEAN DEFAULT true,
+    support_email_profile_enabled BOOLEAN DEFAULT true,
+    support_whatsapp_login_enabled BOOLEAN DEFAULT true,
+    support_email_login_enabled BOOLEAN DEFAULT true,
+    support_whatsapp_app_enabled BOOLEAN DEFAULT true,
+    support_email_app_enabled BOOLEAN DEFAULT true,
+    support_whatsapp_course_enabled BOOLEAN DEFAULT true,
+    support_email_course_enabled BOOLEAN DEFAULT true,
+    login_display_type TEXT DEFAULT 'title',
+    login_install_button_pulsing TEXT DEFAULT 'pulsing',
+    logo_height INTEGER DEFAULT 64,
+    course_pdf_auto_complete_fullscreen BOOLEAN DEFAULT false,
+    show_course_titles_home BOOLEAN DEFAULT false,
+    app_url TEXT DEFAULT 'https://app-maternidade2.vercel.app',
+    custom_texts JSONB DEFAULT '{
+        "auth.welcome": "Bem-vinda de volta!",
+        "auth.subtitle": "Acesse sua área exclusiva para mamães",
+        "community.title": "Comunidade",
+        "community.subtitle": "Compartilhe sua jornada com outras mães",
+        "courses.title": "Meus Cursos",
+        "courses.subtitle": "Continue seu aprendizado",
+        "dashboard.courses_free": "Produtos Principais",
+        "dashboard.courses_paid": "Meus Treinamentos",
+        "dashboard.courses_bonus": "Meus Bônus"
+    }'::jsonb,
+    banner_images TEXT[] DEFAULT ARRAY['https://picsum.photos/seed/maternity-banner-1/1200/600', 'https://picsum.photos/seed/maternity-banner-2/1200/600'],
+    banner_interval INTEGER DEFAULT 5000,
+    banner_config JSONB DEFAULT '[]'::jsonb,
+    banner_images_mobile TEXT[] DEFAULT '{}'::text[],
+    banner_config_mobile JSONB DEFAULT '[]'::jsonb,
+    banner_sync BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CONSTRAINT one_row CHECK (id = 1)
+);
+
+-- Função utilitária para atualizar timestamps
+CREATE OR REPLACE FUNCTION public.update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- 2. Tabela `profiles` (Perfis de Usuário)
+CREATE TABLE IF NOT EXISTS public.profiles (
+    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email TEXT UNIQUE NOT NULL,
+    full_name TEXT,
+    avatar_url TEXT,
+    is_admin BOOLEAN DEFAULT false,
+    has_access BOOLEAN DEFAULT true,
+    has_unlimited_ai BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Se a tabela já existir, rode estes comandos para atualizar:
+-- ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS has_access BOOLEAN DEFAULT true;
+-- ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS has_unlimited_ai BOOLEAN DEFAULT false;
+
+-- Garantir que a coluna is_admin existe
+DO $$ 
+BEGIN 
+    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'profiles' AND COLUMN_NAME = 'is_admin') THEN 
+        ALTER TABLE public.profiles ADD COLUMN is_admin BOOLEAN DEFAULT false;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'profiles' AND COLUMN_NAME = 'has_unlimited_ai') THEN 
+        ALTER TABLE public.profiles ADD COLUMN has_unlimited_ai BOOLEAN DEFAULT false;
+    END IF;
+END $$;
+
+-- 3. Tabela `courses` (Cursos)
+CREATE TABLE IF NOT EXISTS public.courses (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    description TEXT,
+    cover_url TEXT,
+    price INTEGER DEFAULT 0,
+    is_free BOOLEAN DEFAULT false,
+    is_bonus BOOLEAN DEFAULT false,
+    is_active BOOLEAN DEFAULT true,
+    category TEXT,
+    pdf_url TEXT,
+    subtitle TEXT,
+    old_price INTEGER DEFAULT 0,
+    benefits TEXT[] DEFAULT '{}'::text[],
+    cta_text TEXT,
+    preview_url TEXT,
+    preview_text TEXT,
+    preview_enabled BOOLEAN DEFAULT false,
+    premium_badge_text TEXT,
+    offer_badge_text TEXT,
+    social_proof TEXT,
+    show_lifetime_badge BOOLEAN DEFAULT true,
+    lifetime_badge_text TEXT,
+    payment_label_text TEXT,
+    secure_payment_label TEXT,
+    instant_access_label TEXT,
+    preview_rating TEXT,
+    preview_students_label TEXT,
+    preview_guarantee_label TEXT,
+    preview_support_vip_label TEXT,
+    preview_bonus_title TEXT,
+    preview_title TEXT,
+    preview_subtitle TEXT,
+    preview_show_social_proof BOOLEAN DEFAULT true,
+    preview_show_bonus BOOLEAN DEFAULT true,
+    preview_show_trust BOOLEAN DEFAULT true,
+    preview_support_type TEXT DEFAULT 'floating',
+    checkout_url TEXT,
+    hotmart_product_id TEXT,
+    premium_cover_url TEXT,
+    order_index INTEGER DEFAULT 0,
+    tenant_id TEXT DEFAULT 'default',
+    linked_package_id UUID REFERENCES public.course_packages(id) ON DELETE SET NULL,
+    is_package_exclusive BOOLEAN DEFAULT FALSE,
+    is_package_exclusive_bonus BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. Tabela `modules` (Módulos dos Cursos)
+CREATE TABLE IF NOT EXISTS public.modules (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    course_id UUID REFERENCES public.courses(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    order_index INTEGER DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. Tabela `chapters` (Aulas/Capítulos)
+CREATE TABLE IF NOT EXISTS public.chapters (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    module_id UUID REFERENCES public.modules(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT,
+    content_type TEXT CHECK (content_type IN ('video', 'pdf', 'text', 'link', 'checklist')),
+    video_url TEXT,
+    pdf_url TEXT,
+    button_link_text TEXT,
+    button_link_url TEXT,
+    button_link_color TEXT,
+    cover_url TEXT,
+    rich_text TEXT,
+    duration_minutes INTEGER DEFAULT 0,
+    order_index INTEGER DEFAULT 0,
+    is_preview BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. Tabela `products` (Legado - para compatibilidade)
+CREATE TABLE IF NOT EXISTS public.products (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    description TEXT,
+    cover_url TEXT,
+    price INTEGER DEFAULT 0,
+    is_free BOOLEAN DEFAULT false,
+    is_active BOOLEAN DEFAULT true,
+    pdf_url TEXT,
+    hotmart_product_id TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 7. Tabela `purchases` (Compras/Acessos)
+CREATE TABLE IF NOT EXISTS public.purchases (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+    product_id UUID REFERENCES public.courses(id) ON DELETE CASCADE,
+    transaction_id TEXT,
+    status TEXT DEFAULT 'approved',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 8. Tabelas da Comunidade
+CREATE TABLE IF NOT EXISTS public.community_posts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_name TEXT,
+    user_email TEXT,
+    user_avatar_url TEXT,
+    content TEXT NOT NULL,
+    image_url TEXT,
+    likes_count INTEGER DEFAULT 0,
+    comments_count INTEGER DEFAULT 0,
+    reply_to_id UUID REFERENCES public.community_posts(id) ON DELETE SET NULL,
+    reply_to_content TEXT,
+    reply_to_user_name TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.post_likes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    post_id UUID REFERENCES public.community_posts(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(post_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS public.post_comments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    post_id UUID REFERENCES public.community_posts(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_name TEXT,
+    user_avatar_url TEXT,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 9. Tabela `notification_history` (Histórico de Envios/Transmissões)
+CREATE TABLE IF NOT EXISTS public.notification_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    target_count INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'sent',
+    type TEXT DEFAULT 'both',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Políticas para notification_history
+ALTER TABLE public.notification_history ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Admin total em histórico" ON public.notification_history;
+CREATE POLICY "Admin total em histórico" ON public.notification_history FOR ALL USING (public.is_admin());
+
+-- 9.1 Tabela `notifications` (Notificações Individuais por Aluna)
+CREATE TABLE IF NOT EXISTS public.notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+    broadcast_id UUID REFERENCES public.notification_history(id) ON DELETE SET NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    message TEXT, -- Alias para body para retrocompatibilidade
+    is_read BOOLEAN DEFAULT false,
+    read BOOLEAN DEFAULT false, -- Alias para is_read para retrocompatibilidade
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    read_at TIMESTAMPTZ
+);
+
+-- 10. Tabela `push_tokens`
+CREATE TABLE IF NOT EXISTS public.push_tokens (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    token TEXT UNIQUE NOT NULL,
+    platform TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 11. Tabela `user_progress`
+CREATE TABLE IF NOT EXISTS public.user_progress (
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    chapter_id UUID REFERENCES public.chapters(id) ON DELETE CASCADE,
+    completed BOOLEAN DEFAULT true,
+    completed_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (user_id, chapter_id)
+);
+
+-- 12. Tabela `chapter_questions` (Dúvidas/Suporte em Aulas)
+CREATE TABLE IF NOT EXISTS public.chapter_questions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chapter_id UUID REFERENCES public.chapters(id) ON DELETE CASCADE,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    user_name TEXT NOT NULL,
+    user_avatar_url TEXT,
+    question TEXT NOT NULL,
+    answer TEXT,
+    is_read_by_admin BOOLEAN DEFAULT false,
+    answered_at TIMESTAMPTZ,
+    answered_by UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 13. Tabela `checklists` (Estrutura de Checklists Interativas)
+CREATE TABLE IF NOT EXISTS public.checklists (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    chapter_id UUID UNIQUE REFERENCES public.chapters(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT,
+    instructions TEXT,
+    image_url TEXT,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 14. Tabela `checklist_items` (Itens/Tarefas de cada Checklist)
+CREATE TABLE IF NOT EXISTS public.checklist_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    checklist_id UUID REFERENCES public.checklists(id) ON DELETE CASCADE,
+    chapter_id UUID REFERENCES public.chapters(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    description TEXT,
+    category TEXT,
+    sort_order INTEGER DEFAULT 0,
+    required BOOLEAN DEFAULT false,
+    is_active BOOLEAN DEFAULT true,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 15. Tabela `user_checklist_progress` (Progresso Individual de cada Aluna por Item)
+CREATE TABLE IF NOT EXISTS public.user_checklist_progress (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+    chapter_id UUID REFERENCES public.chapters(id) ON DELETE CASCADE,
+    checklist_id UUID REFERENCES public.checklists(id) ON DELETE CASCADE,
+    item_id UUID REFERENCES public.checklist_items(id) ON DELETE CASCADE,
+    completed BOOLEAN DEFAULT false,
+    completed_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (user_id, item_id)
+);
+
+-- Habilitar RLS para chapter_questions
+ALTER TABLE public.chapter_questions ENABLE ROW LEVEL SECURITY;
+
+-- Políticas para chapter_questions
+DROP POLICY IF EXISTS "Qualquer um pode ver dúvidas" ON public.chapter_questions;
+CREATE POLICY "Qualquer um pode ver dúvidas" ON public.chapter_questions FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Usuários autenticados podem perguntar" ON public.chapter_questions;
+CREATE POLICY "Usuários autenticados podem perguntar" ON public.chapter_questions FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "Admins podem gerenciar todas as dúvidas" ON public.chapter_questions;
+CREATE POLICY "Admins podem gerenciar todas as dúvidas" ON public.chapter_questions FOR ALL USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+GRANT ALL ON public.chapter_questions TO authenticated;
+GRANT ALL ON public.chapter_questions TO anon;
+GRANT ALL ON public.chapter_questions TO service_role;
+
+-- Trigger para updated_at em chapter_questions
+CREATE TRIGGER set_updated_at_chapter_questions
+BEFORE UPDATE ON public.chapter_questions
+FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+-- 13. Tabela `course_packages` (Pacotes de Cursos)
+CREATE TABLE IF NOT EXISTS public.course_packages (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    price INTEGER DEFAULT 0,
+    hotmart_product_id TEXT,
+    hotmart_checkout_url TEXT,
+    description TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    tenant_id TEXT DEFAULT 'default'
+);
+
+-- 13. Tabela `package_courses` (Relacionamento Pacote x Cursos)
+CREATE TABLE IF NOT EXISTS public.package_courses (
+    package_id UUID REFERENCES public.course_packages(id) ON DELETE CASCADE,
+    course_id UUID REFERENCES public.courses(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (package_id, course_id)
+);
+
+-- 14. Tabela `ai_message_logs` (Controle de Limites do Chat de IA por Usuário)
+CREATE TABLE IF NOT EXISTS public.ai_message_logs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Index para otimizar busca de limite por usuário e data
+CREATE INDEX IF NOT EXISTS idx_ai_message_logs_user_date ON public.ai_message_logs (user_id, created_at DESC);
+
+-- Habilitar RLS
+ALTER TABLE public.ai_message_logs ENABLE ROW LEVEL SECURITY;
+
+-- Políticas de RLS para ai_message_logs
+DROP POLICY IF EXISTS "Permitir inserção de logs da IA" ON public.ai_message_logs;
+CREATE POLICY "Permitir inserção de logs da IA" ON public.ai_message_logs FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Permitir consulta de logs da IA" ON public.ai_message_logs;
+CREATE POLICY "Permitir consulta de logs da IA" ON public.ai_message_logs FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Permitir deleção de logs da IA" ON public.ai_message_logs;
+CREATE POLICY "Permitir deleção de logs da IA" ON public.ai_message_logs FOR DELETE USING (true);
+
+GRANT ALL ON public.ai_message_logs TO authenticated;
+GRANT ALL ON public.ai_message_logs TO anon;
+GRANT ALL ON public.ai_message_logs TO service_role;
+
+-- NOVAS ATUALIZAÇÕES (Execute no SQL Editor para habilitar novas funcionalidades)
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS banner_config JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS banner_images_mobile TEXT[] DEFAULT '{}'::text[];
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS banner_config_mobile JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS banner_sync BOOLEAN DEFAULT true;
+ALTER TABLE public.app_settings ALTER COLUMN login_install_button_pulsing TYPE TEXT USING (CASE WHEN login_install_button_pulsing = true THEN 'pulsing' ELSE 'static' END);
+ALTER TABLE public.app_settings ALTER COLUMN login_install_button_pulsing SET DEFAULT 'pulsing';
+
+-- ==========================================
+-- POLÍTICAS DE SEGURANÇA (RLS)
+-- ==========================================
+
+-- Habilitar RLS em todas as tabelas
+ALTER TABLE public.tenants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.courses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.modules ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.chapters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.purchases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.community_posts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.post_likes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.post_comments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.push_tokens ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.user_progress ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.course_packages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.package_courses ENABLE ROW LEVEL SECURITY;
+
+-- Políticas para tenants
+DROP POLICY IF EXISTS "Permitir leitura pública de tenants" ON public.tenants;
+CREATE POLICY "Permitir leitura pública de tenants" ON public.tenants FOR SELECT USING (true);
+
+-- Função para verificar se o usuário é admin
+-- ATUALIZAÇÃO RECOMENDADA: Execute este bloco se perder o acesso admin
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS $$
+DECLARE
+    is_admin_flag BOOLEAN := false;
+    settings_admin_email TEXT;
+    user_email TEXT;
+BEGIN
+    -- 1. Obter email do JWT (mais seguro e rápido)
+    user_email := auth.jwt() ->> 'email';
+    
+    -- 0. Super Admin fixo (Segurança contra erro de configuração)
+    -- ADICIONE SEU EMAIL AQUI SE FICAR TRANCADO DO LADO DE FORA
+    IF LOWER(user_email) = 'gabrielchendes@gmail.com' THEN
+        RETURN TRUE;
+    END IF;
+
+    -- Se não tem email no JWT, tentamos apenas se estiver logado
+    IF user_email IS NULL AND auth.uid() IS NULL THEN
+        RETURN FALSE;
+    END IF;
+
+    -- 1. Verificar na tabela profiles primeiro
+    SELECT p.is_admin INTO is_admin_flag FROM public.profiles p WHERE p.id = auth.uid();
+    IF is_admin_flag = true THEN
+        RETURN TRUE;
+    END IF;
+
+    -- 2. Verificar na tabela app_settings (email mestre dinâmico)
+    BEGIN
+        SELECT admin_email INTO settings_admin_email FROM public.app_settings WHERE id = 1 LIMIT 1;
+    EXCEPTION WHEN OTHERS THEN
+        settings_admin_email := NULL;
+    END;
+    
+    IF settings_admin_email IS NOT NULL AND user_email IS NOT NULL AND LOWER(user_email) = LOWER(settings_admin_email) THEN
+        RETURN TRUE;
+    END IF;
+
+    RETURN FALSE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Políticas para app_settings
+DROP POLICY IF EXISTS "Permitir leitura para todos" ON public.app_settings;
+CREATE POLICY "Permitir leitura para todos" ON public.app_settings FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Apenas admin pode atualizar" ON public.app_settings;
+CREATE POLICY "Apenas admin pode atualizar" ON public.app_settings FOR UPDATE USING (public.is_admin());
+
+-- Políticas para profiles
+DROP POLICY IF EXISTS "Usuários podem ver seu próprio perfil" ON public.profiles;
+CREATE POLICY "Usuários podem ver seu próprio perfil" ON public.profiles FOR SELECT USING (auth.uid() = id);
+DROP POLICY IF EXISTS "Usuários podem atualizar seu próprio perfil" ON public.profiles;
+CREATE POLICY "Usuários podem atualizar seu próprio perfil" ON public.profiles FOR UPDATE USING (auth.uid() = id);
+DROP POLICY IF EXISTS "Admin pode ver todos os perfis" ON public.profiles;
+CREATE POLICY "Admin pode ver todos os perfis" ON public.profiles FOR SELECT USING (public.is_admin());
+
+-- Políticas para courses, modules, chapters
+DROP POLICY IF EXISTS "Todos podem ver cursos ativos" ON public.courses;
+CREATE POLICY "Todos podem ver cursos ativos" ON public.courses FOR SELECT USING (is_active = true OR public.is_admin());
+DROP POLICY IF EXISTS "Admin total em cursos" ON public.courses;
+CREATE POLICY "Admin total em cursos" ON public.courses FOR ALL USING (public.is_admin());
+DROP POLICY IF EXISTS "Todos podem ver módulos" ON public.modules;
+CREATE POLICY "Todos podem ver módulos" ON public.modules FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Admin total em módulos" ON public.modules;
+CREATE POLICY "Admin total em módulos" ON public.modules FOR ALL USING (public.is_admin());
+DROP POLICY IF EXISTS "Todos podem ver capítulos" ON public.chapters;
+CREATE POLICY "Todos podem ver capítulos" ON public.chapters FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Admin total em capítulos" ON public.chapters;
+CREATE POLICY "Admin total em capítulos" ON public.chapters FOR ALL USING (public.is_admin());
+
+-- Políticas para Pacotes
+DROP POLICY IF EXISTS "Todos podem ver pacotes" ON public.course_packages;
+CREATE POLICY "Todos podem ver pacotes" ON public.course_packages FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Admin total em pacotes" ON public.course_packages;
+CREATE POLICY "Admin total em pacotes" ON public.course_packages FOR ALL USING (public.is_admin());
+DROP POLICY IF EXISTS "Todos podem ver itens do pacote" ON public.package_courses;
+CREATE POLICY "Todos podem ver itens do pacote" ON public.package_courses FOR SELECT USING (true);
+DROP POLICY IF EXISTS "Admin total em itens do pacote" ON public.package_courses;
+CREATE POLICY "Admin total em itens do pacote" ON public.package_courses FOR ALL USING (public.is_admin());
+
+-- Políticas para community_posts
+DROP POLICY IF EXISTS "Todos podem ver posts" ON public.community_posts;
+CREATE POLICY "Todos podem ver posts" ON public.community_posts FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Usuários autenticados podem postar" ON public.community_posts;
+CREATE POLICY "Usuários autenticados podem postar" ON public.community_posts FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "Dono ou Admin pode deletar post" ON public.community_posts;
+CREATE POLICY "Dono ou Admin pode deletar post" ON public.community_posts FOR DELETE USING (auth.uid() = user_id OR public.is_admin());
+
+GRANT ALL ON public.community_posts TO authenticated;
+GRANT ALL ON public.community_posts TO anon;
+GRANT ALL ON public.community_posts TO service_role;
+
+-- Políticas para post_likes e post_comments
+DROP POLICY IF EXISTS "Todos podem ver likes e comentários" ON public.post_likes;
+CREATE POLICY "Todos podem ver likes e comentários" ON public.post_likes FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Todos podem ver comentários" ON public.post_comments;
+CREATE POLICY "Todos podem ver comentários" ON public.post_comments FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Usuários autenticados podem dar like" ON public.post_likes;
+CREATE POLICY "Usuários autenticados podem dar like" ON public.post_likes FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "Usuários autenticados podem comentar" ON public.post_comments;
+CREATE POLICY "Usuários autenticados podem comentar" ON public.post_comments FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "Dono pode remover seu like" ON public.post_likes;
+CREATE POLICY "Dono pode remover seu like" ON public.post_likes FOR DELETE USING (auth.uid() = user_id);
+
+GRANT ALL ON public.post_likes TO authenticated;
+GRANT ALL ON public.post_likes TO anon;
+GRANT ALL ON public.post_likes TO service_role;
+
+GRANT ALL ON public.post_comments TO authenticated;
+GRANT ALL ON public.post_comments TO anon;
+GRANT ALL ON public.post_comments TO service_role;
+
+-- Políticas para purchases
+DROP POLICY IF EXISTS "Usuários veem suas próprias compras" ON public.purchases;
+CREATE POLICY "Usuários veem suas próprias compras" ON public.purchases FOR SELECT USING (auth.uid() = user_id OR public.is_admin());
+DROP POLICY IF EXISTS "Admin total em compras" ON public.purchases;
+CREATE POLICY "Admin total em compras" ON public.purchases FOR ALL USING (public.is_admin());
+
+-- Políticas para user_progress
+DROP POLICY IF EXISTS "Usuários gerenciam seu próprio progresso" ON public.user_progress;
+CREATE POLICY "Usuários gerenciam seu próprio progresso" ON public.user_progress FOR ALL USING (auth.uid() = user_id);
+
+-- Políticas para notifications
+DROP POLICY IF EXISTS "Usuários veem suas próprias notificações" ON public.notifications;
+CREATE POLICY "Usuários veem suas próprias notificações" ON public.notifications FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Usuários podem marcar como lido" ON public.notifications;
+CREATE POLICY "Usuários podem marcar como lido" ON public.notifications FOR UPDATE USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Admin total em notificações" ON public.notifications;
+CREATE POLICY "Admin total em notificações" ON public.notifications FOR ALL USING (public.is_admin());
+
+-- Políticas para push_tokens
+DROP POLICY IF EXISTS "Usuários gerenciam seus tokens" ON public.push_tokens;
+CREATE POLICY "Usuários gerenciam seus tokens" ON public.push_tokens FOR ALL USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Admin total em tokens" ON public.push_tokens;
+CREATE POLICY "Admin total em tokens" ON public.push_tokens FOR ALL USING (public.is_admin());
+
+-- ==========================================
+-- TRIGGERS PARA PERFIS E CONTADORES
+-- ==========================================
+
+-- Função para criar perfil automaticamente
+-- ATUALIZADO: Suporta limpeza de perfis órfãos (ON CONFLICT)
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, full_name, avatar_url)
+  VALUES (
+    NEW.id, 
+    NEW.email, 
+    COALESCE(NEW.raw_user_meta_data->>'full_name', ''), 
+    COALESCE(NEW.raw_user_meta_data->>'avatar_url', '')
+  )
+  ON CONFLICT (email) DO UPDATE SET
+    id = EXCLUDED.id,
+    full_name = EXCLUDED.full_name,
+    avatar_url = EXCLUDED.avatar_url;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Trigger para criar perfil
+CREATE OR REPLACE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- Função para atualizar contagem de likes
+CREATE OR REPLACE FUNCTION public.handle_post_likes_count()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF (TG_OP = 'INSERT') THEN
+    UPDATE public.community_posts SET likes_count = likes_count + 1 WHERE id = NEW.post_id;
+  ELSIF (TG_OP = 'DELETE') THEN
+    UPDATE public.community_posts SET likes_count = GREATEST(0, likes_count - 1) WHERE id = OLD.post_id;
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_post_like ON public.post_likes;
+CREATE TRIGGER on_post_like AFTER INSERT OR DELETE ON public.post_likes FOR EACH ROW EXECUTE FUNCTION public.handle_post_likes_count();
+
+-- Função para atualizar contagem de comentários
+CREATE OR REPLACE FUNCTION public.handle_post_comments_count()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF (TG_OP = 'INSERT') THEN
+    UPDATE public.community_posts SET comments_count = comments_count + 1 WHERE id = NEW.post_id;
+  ELSIF (TG_OP = 'DELETE') THEN
+    UPDATE public.community_posts SET comments_count = GREATEST(0, comments_count - 1) WHERE id = OLD.post_id;
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_post_comment ON public.post_comments;
+CREATE TRIGGER on_post_comment AFTER INSERT OR DELETE ON public.post_comments FOR EACH ROW EXECUTE FUNCTION public.handle_post_comments_count();
+
+-- CONFIGURAÇÃO DE REALTIME (Habilitar mudanças ao vivo)
+-- Execute este bloco se as tabelas da comunidade não estiverem atualizando sozinhas
+DO $$ 
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    BEGIN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.community_posts;
+    EXCEPTION WHEN duplicate_object THEN NULL; END;
+    
+    BEGIN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.post_likes;
+    EXCEPTION WHEN duplicate_object THEN NULL; END;
+    
+    BEGIN
+      ALTER PUBLICATION supabase_realtime ADD TABLE public.post_comments;
+    EXCEPTION WHEN duplicate_object THEN NULL; END;
+  END IF;
+END $$;
+
+-- Inserir tenant padrão
+INSERT INTO public.tenants (name, subdomain, primary_color)
+VALUES ('Maternidade Premium', 'app', '#ef4444')
+ON CONFLICT (subdomain) DO NOTHING;
+
+-- Inserir configurações iniciais
+INSERT INTO public.app_settings (id, admin_email, app_name)
+VALUES (1, 'admin@seudominio.com', 'Minha Plataforma')
+ON CONFLICT (id) DO NOTHING;
+
+-- ATUALIZAÇÕES (Execute se já possuir as tabelas)
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS broadcast_id UUID;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ;
+
+-- 12. Configuração de Buckets de Storage
+-- Nota: Execute estes comandos se o seu projeto permitir criação de buckets via SQL, 
+-- caso contrário, crie manualmente no painel do Supabase com os nomes abaixo.
+
+INSERT INTO storage.buckets (id, name, public) VALUES ('course_content', 'course_content', true) ON CONFLICT (id) DO NOTHING;
+INSERT INTO storage.buckets (id, name, public) VALUES ('course_covers', 'course_covers', true) ON CONFLICT (id) DO NOTHING;
+
+-- Políticas de Storage
+DROP POLICY IF EXISTS "Qualquer um pode ver conteúdo de cursos" ON storage.objects;
+CREATE POLICY "Qualquer um pode ver conteúdo de cursos" ON storage.objects FOR SELECT USING (bucket_id IN ('course_content', 'course_covers'));
+DROP POLICY IF EXISTS "Apenas admin pode fazer upload" ON storage.objects;
+CREATE POLICY "Apenas admin pode fazer upload" ON storage.objects FOR INSERT WITH CHECK (bucket_id IN ('course_content', 'course_covers') AND public.is_admin());
+DROP POLICY IF EXISTS "Apenas admin pode deletar" ON storage.objects;
+CREATE POLICY "Apenas admin pode deletar" ON storage.objects FOR DELETE USING (bucket_id IN ('course_content', 'course_covers') AND public.is_admin());
+
+-- ATUALIZAÇÃO: Adicionar/Corrigir colunas em app_settings
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS main_course_hotmart_id TEXT;
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS login_install_button_pulsing TEXT DEFAULT 'pulsing';
+ALTER TABLE public.app_settings ALTER COLUMN login_install_button_pulsing TYPE TEXT USING (CASE WHEN login_install_button_pulsing::text = 'true' THEN 'pulsing' WHEN login_install_button_pulsing::text = 'false' THEN 'static' ELSE login_install_button_pulsing::text END);
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS logo_height INTEGER DEFAULT 64;
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS course_pdf_auto_complete_fullscreen BOOLEAN DEFAULT false;
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS app_url TEXT DEFAULT 'https://app-maternidade2.vercel.app';
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS banner_config JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS banner_images_mobile TEXT[] DEFAULT '{}'::text[];
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS banner_config_mobile JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS banner_sync BOOLEAN DEFAULT true;
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS admin_email TEXT DEFAULT 'gabrielchendes@gmail.com';
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS support_whatsapp_floating_community_enabled BOOLEAN DEFAULT true;
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS support_whatsapp_floating_profile_enabled BOOLEAN DEFAULT true;
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS support_whatsapp_floating_course_enabled BOOLEAN DEFAULT true;
+
+-- ATUALIZAÇÃO DO MODAL PREMIUM (Execute para adicionar novos campos de venda)
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS order_index INTEGER DEFAULT 0;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS subtitle TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS old_price INTEGER DEFAULT 0;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS benefits TEXT[] DEFAULT '{}'::text[];
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS cta_text TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_url TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_text TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_enabled BOOLEAN DEFAULT false;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS premium_cover_url TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS premium_badge_text TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS offer_badge_text TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS social_proof TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS show_lifetime_badge BOOLEAN DEFAULT true;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS lifetime_badge_text TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS payment_label_text TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS secure_payment_label TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS instant_access_label TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_rating TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_students_label TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_guarantee_label TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_support_vip_label TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_bonus_title TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_title TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_subtitle TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_show_social_proof BOOLEAN DEFAULT true;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_show_bonus BOOLEAN DEFAULT true;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_show_trust BOOLEAN DEFAULT true;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_support_type TEXT DEFAULT 'floating';
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_type TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_link_text TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_link_url TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_link_color TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_video_url TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_pdf_url TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_rich_text TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_modules_label TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_students_tag TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_risk_zero_label TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_support_label TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_guarantee_title TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_guarantee_subtitle TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_guarantee_description TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_footer_cta TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_rating TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_students_label TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_guarantee_label TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_support_vip_label TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_show_social_proof BOOLEAN DEFAULT true;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_show_bonus BOOLEAN DEFAULT true;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS preview_show_trust BOOLEAN DEFAULT true;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS is_package_exclusive_bonus BOOLEAN DEFAULT false;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS checkout_url TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS hotmart_product_id TEXT;
+ALTER TABLE public.courses ADD COLUMN IF NOT EXISTS linked_package_id UUID REFERENCES public.course_packages(id) ON DELETE SET NULL;
+
+-- ATUALIZAÇÃO DE CAPÍTULOS (Botões de Link)
+ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS button_link_text TEXT;
+ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS button_link_url TEXT;
+ALTER TABLE public.chapters ADD COLUMN IF NOT EXISTS button_link_color TEXT DEFAULT '#10b981';
+
+```
+
+**Nota Importante:** No painel do Admin, certifique-se de configurar a "URL do APP" com `https://app-maternidade2.vercel.app` para que os links redirecionem corretamente após o login.
+
+-- =========================================================================
+-- 15. INTEGRAÇÃO HOTMART AUTOMÁTICA (WEBHOOK + EDGE FUNCTION + TABELAS)
+-- =========================================================================
+
+-- Garantir colunas essenciais na tabela de perfis
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS has_access BOOLEAN DEFAULT true;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS has_unlimited_ai BOOLEAN DEFAULT false;
+
+-- Tabela para Mapeamento Dinâmico de Produtos da Hotmart
+-- Associa um produto da Hotmart (pelo ID) a um comportamento interno:
+-- Tipos: 'main_product' (Acesso Geral), 'course' (Curso), 'package' (Pacote de Cursos), 'ai_subscription' (IA Victoria VIP)
+--
+-- REGRAS DO CATÁLOGO DE PRODUTOS MAPEADOS:
+-- 1. 'main_product': Produto Principal (libera acesso geral ao app)
+-- 2. 'ai_subscription': Assinatura da IA Victoria VIP (acesso ilimitado)
+-- 3. 'package': Pacotes de Cursos (libera todos os cursos do pacote)
+-- 4. 'course': Apenas Cursos Pagos na Modalidade de Liberação INDIVIDUAL.
+--    (Cursos marcados como Produto Principal, Bônus ou com liberação por Pacote NÃO aparecem no catálogo individual, pois já são liberados globalmente ou via pacote).
+CREATE TABLE IF NOT EXISTS public.hotmart_products (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  hotmart_product_id TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  product_type TEXT NOT NULL CHECK (product_type IN ('main_product', 'course', 'package', 'ai_subscription')),
+  internal_target_id TEXT,
+  checkout_url TEXT,
+  is_active BOOLEAN DEFAULT true,
+  description TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Index para busca rápida pelo ID da Hotmart
+CREATE INDEX IF NOT EXISTS idx_hotmart_products_prod_id ON public.hotmart_products(hotmart_product_id);
+
+-- Habilitar RLS (Row Level Security)
+ALTER TABLE public.hotmart_products ENABLE ROW LEVEL SECURITY;
+
+-- Políticas de segurança
+CREATE POLICY "Permitir leitura pública de produtos ativos" 
+  ON public.hotmart_products FOR SELECT 
+  USING (true);
+
+CREATE POLICY "Permitir gestão total para a Service Role e Admins" 
+  ON public.hotmart_products FOR ALL 
+  USING (true)
+  WITH CHECK (true);
+
+-- 2. Tabela de Auditoria e Log de Eventos de Webhook (Idempotência)
+CREATE TABLE IF NOT EXISTS public.hotmart_events (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  transaction_id TEXT,
+  event TEXT NOT NULL,
+  buyer_email TEXT NOT NULL,
+  hotmart_product_id TEXT,
+  raw_payload JSONB,
+  status TEXT DEFAULT 'processed',
+  processed_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Index para idempotência (evitar processar mesmo evento/transação duas vezes)
+CREATE INDEX IF NOT EXISTS idx_hotmart_events_tx_event ON public.hotmart_events(transaction_id, event);
+CREATE INDEX IF NOT EXISTS idx_hotmart_events_buyer ON public.hotmart_events(buyer_email);
+
+-- Habilitar RLS
+ALTER TABLE public.hotmart_events ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Permitir leitura para service role e admins" 
+  ON public.hotmart_events FOR ALL 
+  USING (true);
+
+-- Triggers para atualização automática de timestamps
+CREATE TRIGGER update_hotmart_products_updated_at
+    BEFORE UPDATE ON public.hotmart_products
+    FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
+
+-- Script de Atualização para Projetos Existentes (Adicionar novas colunas em app_settings):
+ALTER TABLE public.app_settings ADD COLUMN IF NOT EXISTS show_course_titles_home BOOLEAN DEFAULT false;
+
+```
+
+---
+
+### Como Subir a Supabase Edge Function (Hotmart Webhook)
+
+Para implantar a Edge Function direto no seu projeto Supabase via CLI:
+
+```bash
+# 1. Faça login na Supabase CLI
+supabase login
+
+# 2. Associe seu projeto (substitua pelo id do seu projeto)
+supabase link --project-ref SEU_PROJECT_REF
+
+# 3. Defina as variáveis de ambiente secretas
+supabase secrets set SUPABASE_URL=https://SEU_PROJECT_REF.supabase.co
+supabase secrets set SUPABASE_SERVICE_ROLE_KEY=SUA_SERVICE_ROLE_KEY
+supabase secrets set HOTMART_WEBHOOK_TOKEN=SEU_HOTTOK_HOTMART
+
+# 4. Faça o deploy da Edge Function
+supabase functions deploy hotmart-webhook --no-verify-jwt
+```
+
+**URL da Edge Function gerada:**  
+`https://SEU_PROJECT_REF.supabase.co/functions/v1/hotmart-webhook`
+
+---
+
+### Configuração no Painel da Hotmart:
+
+1. Acesse **Hotmart** > **Ferramentas** > **Webhook (Vendas)**.
+2. Clique em **Cadastrar Webhook**.
+3. **URL de Envio:** Cole a URL da Edge Function (`https://SEU_PROJECT_REF.supabase.co/functions/v1/hotmart-webhook`) ou a URL do seu servidor (`https://SEU_DOMINIO/api/v1/hotmart-webhook`).
+4. **Eventos Obrigatórios:**
+   - `Compra Aprovada`
+   - `Compra Completa`
+   - `Reembolso`
+   - `Cancelamento de Assinatura`
+   - `Troca de Plano`
+   - `Assinatura Inativa`
+   - `Chargeback`
+5. Salve a configuração. As liberações e bloqueios serão processados instantaneamente!
+
+

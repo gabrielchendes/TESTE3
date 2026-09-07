@@ -1,0 +1,110 @@
+{
+  "framework": "vite",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/api/v1/auth/:action",
+      "destination": "/api/v1/auth?action=:action"
+    },
+    {
+      "source": "/api/v1/admin/:action",
+      "destination": "/api/v1/admin?action=:action"
+    },
+    {
+      "source": "/api/v1/notifications/:action",
+      "destination": "/api/v1/notifications?action=:action"
+    },
+    {
+      "source": "/api/v1/webhooks/hotmart",
+      "destination": "/api/v1/hotmart-webhook"
+    },
+    {
+      "source": "/api/v1/webhook-hotmart",
+      "destination": "/api/v1/hotmart-webhook"
+    },
+    {
+      "source": "/api/v1/login-verify",
+      "destination": "/api/v1/auth?action=login-verify"
+    },
+    {
+      "source": "/api/v1/user-magic-link",
+      "destination": "/api/v1/auth?action=user-magic-link"
+    },
+    {
+      "source": "/api/v1/user-password-set",
+      "destination": "/api/v1/auth?action=user-password-set"
+    },
+    {
+      "source": "/api/v1/users-list",
+      "destination": "/api/v1/admin?action=users-list"
+    },
+    {
+      "source": "/api/v1/user-create",
+      "destination": "/api/v1/admin?action=user-create"
+    },
+    {
+      "source": "/api/v1/user-delete/:id",
+      "destination": "/api/v1/admin?action=user-delete&id=:id"
+    },
+    {
+      "source": "/api/v1/notify-admin",
+      "destination": "/api/v1/notifications?action=notify-admin"
+    },
+    {
+      "source": "/api/v1/notification-push",
+      "destination": "/api/v1/notifications?action=notification-push"
+    },
+    {
+      "source": "/api/v1/notification-history",
+      "destination": "/api/v1/notifications?action=notification-history"
+    },
+    {
+      "source": "/api/v1/notification-clear",
+      "destination": "/api/v1/notifications?action=notification-clear"
+    },
+    {
+      "source": "/api/v1/sub-topic",
+      "destination": "/api/v1/notifications?action=sub-topic"
+    },
+    {
+      "source": "/api/v1/generate-permanent-link",
+      "destination": "/api/v1/admin?action=generate-permanent-link"
+    },
+    {
+      "source": "/api/v1/ai/:action",
+      "destination": "/api/v1/ai?action=:action"
+    },
+    {
+      "source": "/api/v1/ai-chat",
+      "destination": "/api/v1/ai?action=ai-chat"
+    },
+    {
+      "source": "/api/v1/ai-course-editor",
+      "destination": "/api/v1/ai?action=ai-course-editor"
+    },
+    {
+      "source": "/api/v1/analyze-message",
+      "destination": "/api/v1/ai?action=analyze-message"
+    },
+    {
+      "source": "/api/v1/build-complete-course",
+      "destination": "/api/v1/ai?action=build-complete-course"
+    },
+    {
+      "source": "/api/v1/generate-course-copy",
+      "destination": "/api/v1/ai?action=generate-course-copy"
+    },
+    {
+      "source": "/api/v1/generate-lesson",
+      "destination": "/api/v1/ai?action=generate-lesson"
+    },
+    {
+      "source": "/api/v1/refine-sales-copy",
+      "destination": "/api/v1/ai?action=refine-sales-copy"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

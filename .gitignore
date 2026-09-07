@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Production builds
+dist/
+build/
+coverage/
+
+# Environment files and credentials
+.env
+.env.*
+.env.local
+.env.development
+.env.test
+.env.production
+!.env.example
+
+# Service account keys and credentials
+*.pem
+*.key
+*.cert
+service-account*.json
+firebase-service-account*.json
+
+# Framework and tooling
+.vercel/
+*.tsbuildinfo
+*.log
+.DS_Store
+
+

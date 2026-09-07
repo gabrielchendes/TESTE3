@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script>
+      // Global error listeners to intercept cross-origin "Script error." and PWA/analytics exceptions early
+      (function() {
+        function checkBenign(msg, src) {
+          var message = String(msg || '');
+          var source = String(src || '');
+          return (
+            message.indexOf('WebSocket') !== -1 ||
+            message.indexOf('websocket') !== -1 ||
+            message.indexOf('[vite]') !== -1 ||
+            message.indexOf('Script error') !== -1 || 
+            message.toLowerCase().indexOf('script error') !== -1 ||
+            message.indexOf('Failed to fetch dynamically imported module') !== -1 ||
+            message.indexOf('NetworkError when attempting to fetch resource') !== -1 ||
+            message.indexOf('NetworkError') !== -1 ||
+            message.indexOf('Failed to fetch') !== -1 ||
+            message.indexOf('Load failed') !== -1 ||
+            source.indexOf('googletagmanager') !== -1 || 
+            source.indexOf('gtag') !== -1 ||
+            source.indexOf('supabase') !== -1 ||
+            source.indexOf('pwa') !== -1 ||
+            !message // Empty error messages
+          );
+        }
+
+        // 1. Classic onerror handler
+        window.onerror = function(message, source, lineno, colno, error) {
+          if (checkBenign(message, source)) {
+            console.warn('⚠️ Suppressed early window.onerror:', message, 'from:', source);
+            return true; // Prevents the error from propagating
+          }
+          return false;
+        };
+
+        // 2. Modern event listener with capture and stopPropagation
+        window.addEventListener('error', function(event) {
+          var msg = event.message || '';
+          var src = event.filename || '';
+          if (checkBenign(msg, src)) {
+            console.warn('⚠️ Suppressed early error event:', msg, 'from:', src);
+            try {
+              event.preventDefault();
+              event.stopPropagation();
+              event.stopImmediatePropagation();
+            } catch (e) {}
+          }
+        }, true);
+
+        // 3. Handle unhandled promise rejections early too
+        window.addEventListener('unhandledrejection', function(event) {
+          var reason = event.reason;
+          var msg = reason ? String(reason.message || reason) : '';
+          var isBenign = 
+            msg.indexOf('WebSocket') !== -1 ||
+            msg.indexOf('websocket') !== -1 ||
+            msg.indexOf('[vite]') !== -1 ||
+            msg.indexOf('Refresh Token Not Found') !== -1 || 
+            msg.indexOf('invalid_grant') !== -1 || 
+            msg.indexOf('Invalid Refresh Token') !== -1 ||
+            msg.indexOf('Script error') !== -1 || 
+            msg.toLowerCase().indexOf('script error') !== -1 ||
+            msg.indexOf('Failed to fetch dynamically imported module') !== -1 ||
+            msg.indexOf('NetworkError when attempting to fetch resource') !== -1 ||
+            msg.indexOf('NetworkError') !== -1 ||
+            msg.indexOf('Failed to fetch') !== -1 ||
+            msg.indexOf('Load failed') !== -1 ||
+            !msg;
+
+          if (isBenign) {
+            console.warn('⚠️ Suppressed early unhandled promise rejection:', msg);
+            try {
+              event.preventDefault();
+              event.stopPropagation();
+              event.stopImmediatePropagation();
+            } catch(e) {}
+          }
+        }, true);
+      })();
+    </script>
+    <script>
+      // Shim for window.fetch to prevent "only a getter" errors from third-party libraries
+      (function() {
+        try {
+          var descriptor = Object.getOwnPropertyDescriptor(window, 'fetch') || Object.getOwnPropertyDescriptor(Object.getPrototypeOf(window), 'fetch');
+          if (descriptor && !descriptor.set && descriptor.configurable) {
+            var _fetch = window.fetch;
+            Object.defineProperty(window, 'fetch', {
+              get: function() { return _fetch; },
+              set: function(v) { _fetch = v; },
+              configurable: true,
+              enumerable: true
+            });
+            console.log('Successfully shimmed window.fetch');
+          }
+        } catch (e) {
+          console.error('Failed to shim window.fetch:', e);
+        }
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Premium App</title>
+    <meta name="description" content="Área de membros exclusiva com conteúdos premium." />
+    <meta property="og:title" content="Premium App" />
+    <meta property="og:description" content="Área de membros exclusiva com conteúdos premium." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <script>
+      (function() {
+        try {
+          var cached = localStorage.getItem('app_settings_cache');
+          if (cached) {
+            var settings = JSON.parse(cached);
+            if (settings) {
+              if (settings.app_name) {
+                document.title = settings.app_name;
+              }
+              if (settings.favicon_url) {
+                var link = document.querySelector("link[rel~='icon']");
+                if (link) {
+                  link.href = settings.favicon_url;
+                  if (!settings.favicon_url.split('?')[0].endsWith('.svg')) {
+                    link.removeAttribute('type');
+                  }
+                }
+              }
+              if (settings.pwa_icon_url) {
+                var appleLink = document.querySelector("link[rel='apple-touch-icon']");
+                if (appleLink) {
+                  appleLink.href = settings.pwa_icon_url;
+                } else {
+                  appleLink = document.createElement('link');
+                  appleLink.rel = 'apple-touch-icon';
+                  appleLink.href = settings.pwa_icon_url;
+                  document.head.appendChild(appleLink);
+                }
+              }
+              if (settings.primary_color) {
+                document.documentElement.style.setProperty('--primary', settings.primary_color);
+              }
+              if (settings.secondary_color) {
+                document.documentElement.style.setProperty('--primary-hover', settings.secondary_color);
+              }
+              if (settings.background_color) {
+                document.documentElement.style.setProperty('--bg-main', settings.background_color);
+              }
+            }
+          }
+        } catch(e) {
+          console.error('Failed to load cached theme:', e);
+        }
+      })();
+    </script>
+    <meta name="theme-color" content="#0f0f0f" />
+  </head>
+  <body>
+    <div id="root">
+      <div style="min-height: 100vh; background-color: var(--bg-main, #0b0c10); display: flex; align-items: center; justify-content: center; position: fixed; inset: 0; z-index: 9999;">
+        <div style="position: relative; display: flex; align-items: center; justify-content: center;">
+          <div style="position: absolute; width: 96px; height: 96px; border-radius: 50%; background: var(--primary, #f43f5e); opacity: 0.25; filter: blur(24px); pointer-events: none; animation: init-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;"></div>
+          <div style="width: 48px; height: 48px; border-radius: 50%; border: 3.5px solid rgba(255, 255, 255, 0.1); border-top-color: var(--primary, #f43f5e); animation: init-spin 0.75s linear infinite; will-change: transform; transform: translateZ(0); filter: drop-shadow(0 0 8px rgba(244, 63, 94, 0.45));"></div>
+        </div>
+      </div>
+      <style>
+        @keyframes init-spin {
+          0% { transform: rotate(0deg) translateZ(0); }
+          100% { transform: rotate(360deg) translateZ(0); }
+        }
+        @keyframes init-pulse {
+          0%, 100% { opacity: 0.25; transform: scale(1); }
+          50% { opacity: 0.12; transform: scale(0.9); }
+        }
+      </style>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
