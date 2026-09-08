@@ -6,19 +6,37 @@ const supabaseUrl =
   process.env.VITE_SUPABASE_URL || 
   '';
 
-const supabaseServiceRoleKey = 
+const isRevokedKey = (key?: string) => {
+  if (!key) return true;
+  const trimmed = key.trim();
+  return trimmed === '' || trimmed === 'undefined' || trimmed === 'null';
+};
+
+const rawServiceRoleKey = 
   process.env.SUPABASE_SERVICE_ROLE_KEY || 
   process.env.SUPABASE_SERVICE_KEY || 
   process.env.SUPABASE_SECRET_KEY || 
   process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || 
   '';
 
+const supabaseServiceRoleKey = isRevokedKey(rawServiceRoleKey) ? '' : rawServiceRoleKey;
+
 const supabaseAnonKey = 
   process.env.SUPABASE_ANON_KEY || 
   process.env.VITE_SUPABASE_ANON_KEY || 
   '';
 
-const supabaseAdmin = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseServiceRoleKey || supabaseAnonKey || 'placeholder-key', {
+const effectiveKey = supabaseServiceRoleKey || supabaseAnonKey || 'placeholder-key';
+
+const supabaseAdmin = createClient(supabaseUrl || 'https://placeholder.supabase.co', effectiveKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+    detectSessionInUrl: false
+  }
+});
+
+const supabasePublic = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey || 'placeholder-key', {
   auth: {
     persistSession: false,
     autoRefreshToken: false,
@@ -99,12 +117,38 @@ async function handleLoginVerify(req: VercelRequest, res: VercelResponse) {
 
   const emailLower = email.toLowerCase().trim();
 
-  // Try to find profile
-  const { data: profile, error: profileError } = await supabaseAdmin
+  // Try to find profile (case-insensitive and trimmed)
+  let { data: profile, error: profileError } = await supabaseAdmin
     .from('profiles')
     .select('id, email, full_name')
-    .eq('email', emailLower)
+    .ilike('email', emailLower)
     .maybeSingle();
+
+  // If there was an error with admin client (e.g. Unregistered API key or 401), fallback to supabasePublic
+  if (profileError && (profileError.message?.includes('Unregistered API key') || (profileError as any)?.status === 401)) {
+    const fallback = await supabasePublic
+      .from('profiles')
+      .select('id, email, full_name')
+      .ilike('email', emailLower)
+      .maybeSingle();
+    if (!fallback.error) {
+      profile = fallback.data;
+      profileError = null;
+    }
+  }
+
+  // Double check with exact match or public client if not found
+  if (!profile) {
+    const fallback = await supabasePublic
+      .from('profiles')
+      .select('id, email, full_name')
+      .eq('email', emailLower)
+      .maybeSingle();
+    if (fallback.data) {
+      profile = fallback.data;
+      profileError = null;
+    }
+  }
 
   if (profileError && profileError.code !== '42P01') {
     console.error('[Auth API] Profile fetch error:', profileError);
@@ -119,28 +163,38 @@ async function handleLoginVerify(req: VercelRequest, res: VercelResponse) {
   let authUserId = profile?.id;
   
   if (!authUserId) {
-    // Check Auth directly
-    const { data: listData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
-    if (listError) {
-      console.error('[Auth API] Auth list error:', listError);
+    // Check Auth directly if service role key is available
+    if (supabaseServiceRoleKey) {
+      const { data: listData, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+      if (listError) {
+        console.warn('[Auth API] Auth list error:', listError.message);
+      } else {
+        const users = listData?.users || [];
+        const user = users.find((u: any) => u.email?.toLowerCase() === emailLower);
+        
+        if (user) {
+          authUserId = user.id;
+          // If user exists in Auth but not in profiles, sync it now
+          const { error: upsertError } = await supabaseAdmin.from('profiles').upsert({
+            id: user.id,
+            email: emailLower,
+            is_admin: false // Default
+          });
+          if (upsertError && upsertError.code !== '42P01') console.error('[Auth API] Profile sync error:', upsertError);
+        }
+      }
     }
-    const users = listData?.users || [];
-    const user = users.find((u: any) => u.email?.toLowerCase() === emailLower);
-    
-    if (user) {
-      authUserId = user.id;
-      // If user exists in Auth but not in profiles, sync it now
-      const { error: upsertError } = await supabaseAdmin.from('profiles').upsert({
-        id: user.id,
-        email: emailLower,
-        is_admin: false // Default
-      });
-      if (upsertError && upsertError.code !== '42P01') console.error('[Auth API] Profile sync error:', upsertError);
-    } else {
+
+    if (!authUserId) {
       // SPECIAL CASE: Check if this is the Master Admin email from settings
       let masterEmail = 'gabrielchendes@gmail.com';
       try {
-        const { data: settings, error: sError } = await supabaseAdmin.from('app_settings').select('admin_email').eq('id', 1).single();
+        let { data: settings, error: sError } = await supabaseAdmin.from('app_settings').select('admin_email').eq('id', 1).single();
+        if (sError && (sError.message?.includes('Unregistered API key') || (sError as any)?.status === 401)) {
+          const fb = await supabasePublic.from('app_settings').select('admin_email').eq('id', 1).single();
+          settings = fb.data;
+          sError = fb.error;
+        }
         if (!sError && settings?.admin_email) masterEmail = settings.admin_email.toLowerCase().trim();
       } catch (settingsErr) {
         console.warn('[Auth API] Could not fetch master email from settings, using hardcoded default');
@@ -154,32 +208,34 @@ async function handleLoginVerify(req: VercelRequest, res: VercelResponse) {
           await supabaseAdmin.from('profiles').delete().eq('id', orphaned.id);
         }
 
-        // Automatically create the Super Admin account if it's missing
-        console.log(`[Auth API] Creating missing Super Admin: ${emailLower}`);
-        const tempPwd = 'Wilson@' + Math.random().toString(36).substring(2, 6);
-        const { data: neo, error: neoError } = await supabaseAdmin.auth.admin.createUser({
-          email: emailLower,
-          password: tempPwd,
-          email_confirm: true,
-          user_metadata: { full_name: 'Super Admin' }
-        });
-        
-        if (neoError) {
-          console.error('[Auth API] Failed to create Super Admin:', neoError);
-          return res.status(404).json({ error: 'User not found. Database configuration check required.' });
-        }
-        
-        authUserId = neo.user?.id;
-        if (authUserId) {
-          await supabaseAdmin.from('profiles').upsert({
-            id: authUserId,
+        // Automatically create the Super Admin account if it's missing and service role key is present
+        if (supabaseServiceRoleKey) {
+          console.log(`[Auth API] Creating missing Super Admin: ${emailLower}`);
+          const tempPwd = 'Wilson@' + Math.random().toString(36).substring(2, 6);
+          const { data: neo, error: neoError } = await supabaseAdmin.auth.admin.createUser({
             email: emailLower,
-            is_admin: true,
-            full_name: 'Super Admin'
+            password: tempPwd,
+            email_confirm: true,
+            user_metadata: { full_name: 'Super Admin' }
           });
+          
+          if (neoError) {
+            console.error('[Auth API] Failed to create Super Admin:', neoError);
+            return res.status(404).json({ error: 'User not found. Database configuration check required.' });
+          }
+          
+          authUserId = neo.user?.id;
+          if (authUserId) {
+            await supabaseAdmin.from('profiles').upsert({
+              id: authUserId,
+              email: emailLower,
+              is_admin: true,
+              full_name: 'Super Admin'
+            });
+          }
         }
       } else {
-        return res.status(404).json({ error: 'User not found.' });
+        return res.status(404).json({ error: 'Usuário não encontrado. Verifique se o e-mail digitado está cadastrado no sistema.' });
       }
     }
   }
@@ -187,7 +243,11 @@ async function handleLoginVerify(req: VercelRequest, res: VercelResponse) {
   // Get master email to check if we should skip password reset
   let masterEmail = 'gabrielchendes@gmail.com';
   try {
-    const { data: settings } = await supabaseAdmin.from('app_settings').select('admin_email').eq('id', 1).single();
+    let { data: settings, error: sError } = await supabaseAdmin.from('app_settings').select('admin_email').eq('id', 1).single();
+    if (sError && (sError.message?.includes('Unregistered API key') || (sError as any)?.status === 401)) {
+      const fb = await supabasePublic.from('app_settings').select('admin_email').eq('id', 1).single();
+      settings = fb.data;
+    }
     if (settings?.admin_email) masterEmail = settings.admin_email.toLowerCase().trim();
   } catch (e) {}
   
@@ -196,7 +256,7 @@ async function handleLoginVerify(req: VercelRequest, res: VercelResponse) {
   // Only reset password to '123456' if NOT the master admin
   const tempPassword = '123456';
   
-  if (!isMasterAdmin) {
+  if (!isMasterAdmin && supabaseServiceRoleKey) {
     try {
       const isUUID = typeof authUserId === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(authUserId);
       let targetAuthId = isUUID ? authUserId : null;
@@ -276,12 +336,10 @@ async function handleMagicLink(req: VercelRequest, res: VercelResponse) {
     }
   } catch (e) {}
 
-  if (!baseUrl && host) {
+  if ((!baseUrl || baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) && host) {
     baseUrl = `https://${host}`;
-  }
-
-  if (!baseUrl || baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')) {
-    baseUrl = 'https://app-maternidade2.vercel.app';
+  } else if (!baseUrl) {
+    baseUrl = host ? `https://${host}` : 'https://app-maternidade2.vercel.app';
   }
 
   const cleanBaseUrl = baseUrl.replace(/\/$/, '');

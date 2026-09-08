@@ -22,6 +22,21 @@ async function startServer() {
   
   // Inject loaded env into process.env if they are not already there
   Object.assign(process.env, env);
+
+  // Clean invalid or placeholder keys
+  const isInvalidKey = (k?: string) => !k || k.trim() === '' || k.trim() === 'undefined' || k.trim() === 'null';
+  if (isInvalidKey(process.env.SUPABASE_SERVICE_ROLE_KEY)) {
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+  }
+  if (isInvalidKey(process.env.SUPABASE_SERVICE_KEY)) {
+    delete process.env.SUPABASE_SERVICE_KEY;
+  }
+  if (isInvalidKey(process.env.SUPABASE_SECRET_KEY)) {
+    delete process.env.SUPABASE_SECRET_KEY;
+  }
+  if (isInvalidKey(process.env.VITE_SUPABASE_SERVICE_ROLE_KEY)) {
+    delete process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+  }
   
   console.log('[Server Init] Loaded Env Vars:', Object.keys(env).filter(k => !k.includes('SECRET') && !k.includes('KEY')));
   console.log('[Server Init] Important Vars Present:', {

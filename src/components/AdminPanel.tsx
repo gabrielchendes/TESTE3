@@ -4350,7 +4350,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
                                 className="w-full bg-black border border-white/10 rounded-2xl px-4 py-3.5 text-white text-sm focus:border-rose-500 outline-none"
                                 placeholder="Ex: https://checkout.seu-gateway.com/mensalidade-victoria-ilimitada"
                               />
-                              <p className="text-[11px] text-gray-500">Cole aqui o link do checkout (Hotmart, Kiwify, Stripe, etc.) para venda da mensalidade ilimitada da IA.</p>
+                              <p className="text-[11px] text-gray-500">Cole aqui o link do checkout (Hotmart, Kiwify, etc.) para venda da mensalidade ilimitada da IA.</p>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

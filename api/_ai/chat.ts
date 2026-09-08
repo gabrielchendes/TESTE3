@@ -8,12 +8,20 @@ const supabaseUrl =
   process.env.VITE_SUPABASE_URL || 
   '';
 
-const supabaseServiceRoleKey = 
+const isRevokedKey = (key?: string) => {
+  if (!key) return true;
+  const trimmed = key.trim();
+  return trimmed === '' || trimmed === 'undefined' || trimmed === 'null';
+};
+
+const rawServiceRoleKey = 
   process.env.SUPABASE_SERVICE_ROLE_KEY || 
   process.env.SUPABASE_SERVICE_KEY || 
   process.env.SUPABASE_SECRET_KEY || 
   process.env.VITE_SUPABASE_SERVICE_ROLE_KEY || 
   '';
+
+const supabaseServiceRoleKey = isRevokedKey(rawServiceRoleKey) ? '' : rawServiceRoleKey;
 
 const supabaseAnonKey = 
   process.env.SUPABASE_ANON_KEY || 
