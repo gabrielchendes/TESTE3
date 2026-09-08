@@ -1,4 +1,5 @@
-import { GoogleGenAI, GenerateContentParameters, GenerateContentResponse } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
+import type { GenerateContentParameters, GenerateContentResponse } from '@google/genai';
 
 export interface GeminiRetryOptions {
   ai: GoogleGenAI;
@@ -12,10 +13,19 @@ export interface GeminiRetryOptions {
 
 export function isRetryableGeminiError(error: any): boolean {
   if (!error) return false;
-  const msg = (error.message || String(error)).toLowerCase();
-  const status = error.status || error.code || error.statusCode;
+  const rawStr = typeof error === 'string' ? error : (JSON.stringify(error) || String(error));
+  const msg = (error.message || error.error?.message || rawStr).toLowerCase();
+  const status = error.status || error.code || error.statusCode || error.error?.code || error.error?.status;
 
-  if (status === 503 || status === 429 || status === 500 || status === 502 || status === 504) {
+  if (
+    status === 503 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 504 ||
+    status === 'UNAVAILABLE' ||
+    status === 'RESOURCE_EXHAUSTED'
+  ) {
     return true;
   }
 
@@ -42,11 +52,11 @@ export async function generateContentWithRetry(
 ): Promise<{ text: string; modelUsed: string; response: GenerateContentResponse }> {
   const {
     ai,
-    candidateModels = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'],
+    candidateModels = ['gemini-3.1-flash-lite', 'gemini-3.8-flash', 'gemini-flash-latest'],
     contents,
     config,
     maxAttemptsPerModel = 2,
-    baseDelayMs = 1200,
+    baseDelayMs = 800,
     logPrefix = '[Gemini Call]'
   } = options;
 
@@ -71,19 +81,31 @@ export async function generateContentWithRetry(
       } catch (err: any) {
         lastError = err;
         const isRetryable = isRetryableGeminiError(err);
-        const errMsg = err?.message || String(err);
+        const rawErrStr = typeof err === 'string' ? err : (err?.message || JSON.stringify(err) || String(err));
 
         console.warn(
           `${logPrefix} Model ${modelName} (attempt ${attempt}/${maxAttemptsPerModel}) error:`,
-          errMsg
+          rawErrStr
         );
+
+        // If high demand 503 error, immediately fall through to the next candidate model
+        const isHighDemand = rawErrStr.toLowerCase().includes('high demand') ||
+                             rawErrStr.toLowerCase().includes('unavailable') ||
+                             err?.status === 503 ||
+                             err?.code === 503 ||
+                             err?.error?.code === 503;
+
+        if (isHighDemand) {
+          console.info(`${logPrefix} Model ${modelName} experiencing high demand; falling over immediately to next candidate model.`);
+          break;
+        }
 
         if (!isRetryable && attempt === 1) {
           break;
         }
 
         const delay = Math.round(
-          baseDelayMs * Math.pow(1.8, attempt - 1) + Math.random() * 400
+          baseDelayMs * Math.pow(1.5, attempt - 1) + Math.random() * 300
         );
 
         if (attempt < maxAttemptsPerModel || modelName !== candidateModels[candidateModels.length - 1]) {

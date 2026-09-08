@@ -273,22 +273,25 @@ async function handleLoginVerify(req: VercelRequest, res: VercelResponse) {
       if (targetAuthId) {
         const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(targetAuthId, { password: tempPassword });
         if (updateError) {
-          console.warn(`[Auth API] Error updating password for ${emailLower}:`, updateError.message);
-          // If the user does not exist in auth.users yet, create them now
-          if (updateError.message?.toLowerCase().includes('not found') || updateError.message?.toLowerCase().includes('user not found')) {
-            console.log(`[Auth API] User ${emailLower} not found in auth.users, creating auth record...`);
-            await supabaseAdmin.auth.admin.createUser({
-              id: targetAuthId,
-              email: emailLower,
-              password: tempPassword,
-              email_confirm: true,
-              user_metadata: { full_name: profile?.full_name || 'Aluno' }
-            });
+          if (updateError.message?.includes('Unregistered API key') || (updateError as any)?.status === 401) {
+            // Service role key in environment is unregistered or revoked, skip admin update gracefully
+          } else {
+            console.warn(`[Auth API] Error updating password for ${emailLower}:`, updateError.message);
+            // If the user does not exist in auth.users yet, create them now
+            if (updateError.message?.toLowerCase().includes('not found') || updateError.message?.toLowerCase().includes('user not found')) {
+              console.log(`[Auth API] User ${emailLower} not found in auth.users, creating auth record...`);
+              await supabaseAdmin.auth.admin.createUser({
+                id: targetAuthId,
+                email: emailLower,
+                password: tempPassword,
+                email_confirm: true,
+                user_metadata: { full_name: profile?.full_name || 'Aluno' }
+              });
+            }
           }
         }
       } else {
         // User not in auth.users yet, create directly
-        console.log(`[Auth API] Creating brand new auth user for ${emailLower}...`);
         const { data: created, error: createError } = await supabaseAdmin.auth.admin.createUser({
           email: emailLower,
           password: tempPassword,
@@ -303,7 +306,7 @@ async function handleLoginVerify(req: VercelRequest, res: VercelResponse) {
             full_name: profile?.full_name || 'Aluno',
             is_admin: false
           });
-        } else if (createError) {
+        } else if (createError && !createError.message?.includes('Unregistered API key') && (createError as any)?.status !== 401) {
           console.error(`[Auth API] Failed to create auth user for ${emailLower}:`, createError);
         }
       }
