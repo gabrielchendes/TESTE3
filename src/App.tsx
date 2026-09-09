@@ -39,9 +39,24 @@ export default function App() {
         console.warn('⚠️ Caught background auth rejection gracefully (preventing unhandled crash):', errorMsg);
         try {
           event.preventDefault();
+          event.stopPropagation();
+          event.stopImmediatePropagation();
         } catch (e) {}
-        // Do NOT aggressively wipe session or force logout on transient API hiccups.
-        // Let supabase.auth manage token lifecycle quietly.
+
+        // If the refresh token is truly gone/invalid, clear local auth storage to stop recurring failed attempts
+        if (errorMsg.includes('Refresh Token Not Found') || errorMsg.includes('Invalid Refresh Token') || errorMsg.includes('invalid_grant')) {
+          try {
+            window.localStorage.removeItem('maternidade_premium_auth');
+            const keys = Object.keys(window.localStorage);
+            keys.forEach(k => {
+              if (k.startsWith('sb-') && k.endsWith('-auth-token')) {
+                window.localStorage.removeItem(k);
+              }
+            });
+          } catch (e) {}
+          setUser(null);
+          setAuthLoading(false);
+        }
       } else if (
         errorMsg.includes('NetworkError') ||
         errorMsg.includes('fetch resource') ||

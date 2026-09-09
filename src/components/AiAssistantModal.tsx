@@ -417,8 +417,10 @@ export default function AiAssistantModal({ userId, userEmail, userName, userAvat
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'application/json',
         },
         body: JSON.stringify({
+          action: 'ai-chat',
           messages: historyForApi,
           userContext: { userName, userId, email: userEmail },
           customSystemPrompt: systemPromptContext || undefined,
@@ -428,7 +430,18 @@ export default function AiAssistantModal({ userId, userEmail, userName, userAvat
         })
       });
 
-      const data = await res.json();
+      const responseText = await res.text();
+      let data: any = {};
+      try {
+        data = responseText ? JSON.parse(responseText) : {};
+      } catch (parseErr) {
+        console.error('Non-JSON response from AI chat:', responseText.substring(0, 200));
+        throw new Error(
+          res.ok
+            ? 'Resposta inválida do servidor.'
+            : `Erro no servidor (${res.status}). Por favor, tente novamente.`
+        );
+      }
 
       if (!res.ok) {
         removeSentTimestamp(sentTs);

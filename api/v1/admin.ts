@@ -159,15 +159,33 @@ async function handleUsersList(req: VercelRequest, res: VercelResponse) {
       console.warn('[Admin API] listUsers fallback due to:', e.message);
     }
 
-    const [profilesRes, purchasesRes, pushTokensRes] = await Promise.all([
+    const [profilesRes, purchasesRes, pushTokensRes, hotmartEventsRes] = await Promise.all([
       supabaseAdmin.from('profiles').select('*'),
       supabaseAdmin.from('purchases').select('user_id, product_id'),
-      supabaseAdmin.from('push_tokens').select('user_id')
+      supabaseAdmin.from('push_tokens').select('user_id'),
+      supabaseAdmin.from('hotmart_events').select('buyer_email, payload').limit(500)
     ]);
     
     const profiles = profilesRes.data || [];
     const purchases = purchasesRes.data || [];
     const pushTokens = pushTokensRes.data || [];
+    const hotmartEvents = hotmartEventsRes.data || [];
+
+    // Map buyer phones and names from hotmart_events
+    const eventBuyerMap = new Map<string, { phone?: string; name?: string }>();
+    if (Array.isArray(hotmartEvents)) {
+      for (const ev of hotmartEvents) {
+        const em = String(ev.buyer_email || '').toLowerCase().trim();
+        if (!em) continue;
+        const buyer = ev.payload?.data?.buyer;
+        const phone = buyer?.checkout_phone || buyer?.phone?.cell || buyer?.phone?.phone;
+        const name = buyer?.name || (buyer?.first_name ? `${buyer.first_name} ${buyer.last_name || ''}`.trim() : undefined);
+        const existing = eventBuyerMap.get(em) || {};
+        if (phone && !existing.phone) existing.phone = String(phone);
+        if (name && !existing.name) existing.name = String(name);
+        eventBuyerMap.set(em, existing);
+      }
+    }
     
     // If authUsers is available from service role, merge them. Otherwise, synthesize from profiles.
     let baseList = authUsers;
@@ -175,19 +193,23 @@ async function handleUsersList(req: VercelRequest, res: VercelResponse) {
       baseList = profiles.map(p => ({
         id: p.id,
         email: p.email,
-        created_at: p.created_at || new Date().toISOString(),
-        user_metadata: { full_name: p.full_name }
+        created_at: p.created_at || (p as any).updated_at || new Date().toISOString(),
+        user_metadata: { 
+          full_name: p.full_name || (p.email ? eventBuyerMap.get(p.email.toLowerCase().trim())?.name : undefined),
+          phone: p.email ? eventBuyerMap.get(p.email.toLowerCase().trim())?.phone : undefined
+        }
       }));
     }
 
     const merged = baseList.map((u: any) => {
-      const profile = profiles.find((p: any) => p.id === u.id || (p.email && u.email && p.email.toLowerCase() === u.email.toLowerCase()));
+      const uEmail = String(u.email || '').toLowerCase().trim();
+      const profile = profiles.find((p: any) => p.id === u.id || (p.email && p.email.toLowerCase().trim() === uEmail));
       const hasPush = Array.isArray(pushTokens) && pushTokens.some((t: any) => t.user_id === u.id);
+      const evData = uEmail ? eventBuyerMap.get(uEmail) : undefined;
       
       const hasAiPurchase = purchases.some((pur: any) => {
         const pUser = String(pur.user_id || '').toLowerCase();
         const uId = String(u.id || '').toLowerCase();
-        const uEmail = String(u.email || '').toLowerCase();
         const isUserMatch = pUser === uId || (uEmail && pUser === uEmail);
         const pId = String(pur.product_id || '').toLowerCase();
         const isAiProd = ['ai_subscription', 'prod_ai_default', 'hotmart_ia_victoria', 'ia_vip', 'unlimited_ai', 'ai_unlimited'].includes(pId);
@@ -205,11 +227,22 @@ async function handleUsersList(req: VercelRequest, res: VercelResponse) {
         hasUnlimitedAi = true;
       }
 
+      const resolvedFullName = u.user_metadata?.full_name || profile?.full_name || evData?.name || '';
+      const resolvedPhone = u.user_metadata?.phone || (profile as any)?.phone || evData?.phone || '';
+
       return { 
         ...u, 
         ...profile, 
         id: u.id, 
         email: u.email,
+        full_name: resolvedFullName,
+        phone: resolvedPhone,
+        user_metadata: {
+          ...(u.user_metadata || {}),
+          full_name: resolvedFullName,
+          phone: resolvedPhone,
+          has_unlimited_ai: hasUnlimitedAi
+        },
         has_unlimited_ai: hasUnlimitedAi,
         push_enabled: !!hasPush 
       };

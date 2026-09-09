@@ -7,20 +7,45 @@ import { handleGenerateCourseCopy } from '../_ai/courseCopy';
 import { handleGenerateLesson } from '../_ai/generateLesson';
 import { handleRefineSalesCopy } from '../_ai/refineCopy';
 
+function parseRequestBody(req: VercelRequest): Record<string, any> {
+  let body = req.body;
+  if (!body) return {};
+  if (typeof body === 'string') {
+    try {
+      return JSON.parse(body);
+    } catch {
+      return {};
+    }
+  }
+  if (Buffer.isBuffer(body)) {
+    try {
+      return JSON.parse(body.toString('utf8'));
+    } catch {
+      return {};
+    }
+  }
+  return typeof body === 'object' ? body : {};
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,GET,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // Normalize request body so downstream handlers receive an object
+  req.body = parseRequestBody(req);
 
   const url = req.url || '';
   const queryAction = req.query?.action as string;
   const pathParts = url.split('?')[0].split('/');
-  const urlAction = pathParts[pathParts.length - 1];
+  const lastPath = pathParts[pathParts.length - 1];
+  const urlAction = lastPath === 'ai' ? '' : lastPath;
   const bodyAction = req.body?.action as string;
 
-  let action = queryAction || bodyAction || urlAction;
+  let action = queryAction || urlAction || bodyAction;
 
   // Normalize action name
   if (action) {

@@ -18,6 +18,15 @@ class ErrorBoundary extends Component<Props, State> {
   };
 
   public static getDerivedStateFromError(error: Error): State {
+    const msg = error?.message || '';
+    if (
+      msg.includes('Refresh Token Not Found') ||
+      msg.includes('Invalid Refresh Token') ||
+      msg.includes('invalid_grant')
+    ) {
+      // Don't crash UI, return safe non-error state so app shows login screen
+      return { hasError: false, error: null };
+    }
     return { hasError: true, error };
   }
 

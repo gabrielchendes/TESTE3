@@ -53,8 +53,17 @@ function getAiClient(): GoogleGenAI {
 }
 
 export async function handleAiChat(req: VercelRequest, res: VercelResponse) {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
   try {
-    const { messages, userContext, customSystemPrompt, expertName, userId, messagesSentCount } = req.body || {};
+    let body = req.body;
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        body = {};
+      }
+    }
+    const { messages, userContext, customSystemPrompt, expertName, userId, messagesSentCount } = body || {};
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ error: 'Message history is required.' });
     }
@@ -144,7 +153,7 @@ export async function handleAiChat(req: VercelRequest, res: VercelResponse) {
           if (currentSentCount >= maxMessages) {
             return res.status(403).json({
               error: 'VIP_REQUIRED',
-              message: customTexts['ai_expert.limit_reached_toast'] || 'Você atingiu o limite de mensagens para este período. Atualize para o plano VIP Ilimitado para conversar sem limites!',
+              message: customTexts['ai_expert.limit_reached_toast'] || 'You have reached the message limit for this period. Upgrade to the Unlimited VIP plan to chat without limits!',
               isLimitReached: true,
               isUserUnlimited: false
             });
@@ -195,7 +204,7 @@ ${userContext?.userName ? `User's Name: ${userContext.userName}` : ''}`;
 
     const responseText = result.text;
 
-    const rawReply = responseText || 'Desculpe, não consegui processar uma resposta no momento. Por favor, tente novamente em instantes.';
+    const rawReply = responseText || 'Sorry, I could not process a response at the moment. Please try again in a few moments.';
     const reply = rawReply.replace(/\*\*/g, '');
 
     return res.status(200).json({
@@ -222,13 +231,13 @@ ${userContext?.userName ? `User's Name: ${userContext.userName}` : ''}`;
 
     if (isQuotaError) {
       return res.status(429).json({
-        error: 'O limite de requisições temporário da IA foi atingido. Por favor, aguarde cerca de 1 minuto e tente novamente.'
+        error: 'The temporary AI request limit has been reached. Please wait about 1 minute and try again.'
       });
     }
 
     if (errMsg.includes('503') || errMsg.includes('UNAVAILABLE') || errMsg.includes('high demand')) {
       return res.status(503).json({
-        error: 'Os servidores de IA estão com alta demanda temporária. Aguarde alguns segundos e tente novamente.'
+        error: 'AI servers are experiencing high temporary demand. Please wait a few seconds and try again.'
       });
     }
 
@@ -246,7 +255,7 @@ ${userContext?.userName ? `User's Name: ${userContext.userName}` : ''}`;
     } catch (_) {}
 
     return res.status(500).json({
-      error: 'Erro de comunicação com a IA Expert: ' + (cleanError || 'Erro desconhecido')
+      error: 'Erro de comunicação com a IA Expert: ' + (cleanError || 'Unknown error')
     });
   }
 }

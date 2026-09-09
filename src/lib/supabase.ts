@@ -20,13 +20,54 @@ export const isSupabaseConfigured = !!(
   supabaseAnonKey !== ''
 );
 
+const AUTH_STORAGE_KEY = 'maternidade_premium_auth';
+
+// Safe localStorage wrapper for Supabase auth that clears dead or corrupted tokens
+const customAuthStorage = {
+  getItem: (key: string): string | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const item = window.localStorage.getItem(key);
+      if (!item) return null;
+      // If token payload exists, ensure it's not a broken JSON
+      try {
+        const parsed = JSON.parse(item);
+        // If it was marked as invalid, ignore it
+        if (parsed?.invalid_refresh) {
+          window.localStorage.removeItem(key);
+          return null;
+        }
+      } catch {
+        window.localStorage.removeItem(key);
+        return null;
+      }
+      return item;
+    } catch {
+      return null;
+    }
+  },
+  setItem: (key: string, value: string): void => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(key, value);
+    } catch {}
+  },
+  removeItem: (key: string): void => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.removeItem(key);
+    } catch {}
+  }
+};
+
 export const supabase = isSupabaseConfigured
   ? createClient(supabaseUrl!, supabaseAnonKey!, {
       auth: {
         autoRefreshToken: true,
         persistSession: true,
         detectSessionInUrl: true,
-        storageKey: 'maternidade_premium_auth' // Explicit key to avoid collisions
+        storageKey: AUTH_STORAGE_KEY,
+        storage: customAuthStorage
       }
     })
   : (null as any);

@@ -77,6 +77,18 @@
               event.stopPropagation();
               event.stopImmediatePropagation();
             } catch(e) {}
+
+            if (msg.indexOf('Refresh Token Not Found') !== -1 || msg.indexOf('Invalid Refresh Token') !== -1 || msg.indexOf('invalid_grant') !== -1) {
+              try {
+                window.localStorage.removeItem('maternidade_premium_auth');
+                for (var i = 0; i < window.localStorage.length; i++) {
+                  var k = window.localStorage.key(i);
+                  if (k && k.indexOf('auth') !== -1) {
+                    window.localStorage.removeItem(k);
+                  }
+                }
+              } catch (e) {}
+            }
           }
         }, true);
       })();
