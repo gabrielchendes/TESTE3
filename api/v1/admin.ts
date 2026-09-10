@@ -9,7 +9,12 @@ const supabaseUrl =
 const isRevokedKey = (key?: string) => {
   if (!key) return true;
   const trimmed = key.trim();
-  return trimmed === '' || trimmed === 'undefined' || trimmed === 'null';
+  return (
+    trimmed === '' || 
+    trimmed === 'undefined' || 
+    trimmed === 'null' ||
+    trimmed === 'placeholder-key'
+  );
 };
 
 const rawServiceRoleKey = 

@@ -22,7 +22,12 @@ const supabaseUrl =
 const isRevokedKey = (key?: string) => {
   if (!key) return true;
   const trimmed = key.trim();
-  return trimmed === '' || trimmed === 'undefined' || trimmed === 'null';
+  return (
+    trimmed === '' || 
+    trimmed === 'undefined' || 
+    trimmed === 'null' ||
+    trimmed === 'placeholder-key'
+  );
 };
 
 const rawServiceRoleKey = 
@@ -89,16 +94,29 @@ if (!supabaseServiceRoleKey && !supabaseAnonKey) {
   console.error('[Notifications API] CRITICAL: Supabase keys are missing');
 }
 
-const supabaseAdmin = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseServiceRoleKey || supabaseAnonKey || 'placeholder-key', {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false,
-    detectSessionInUrl: false
+const supabaseAnonClient = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-key',
+  {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false
+    }
   }
-});
+);
+
+const supabaseAdmin = supabaseServiceRoleKey
+  ? createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseServiceRoleKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false
+      }
+    })
+  : supabaseAnonClient;
 
 function getClientForReq(req?: VercelRequest) {
-  if (supabaseServiceRoleKey) return supabaseAdmin;
   const authHeader = req?.headers?.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
@@ -117,11 +135,12 @@ function getClientForReq(req?: VercelRequest) {
       });
     }
   }
-  return supabaseAdmin;
+  if (supabaseServiceRoleKey) return supabaseAdmin;
+  return supabaseAnonClient;
 }
 
 if (!supabaseServiceRoleKey) {
-  console.warn('[Notifications API] SUPABASE_SERVICE_ROLE_KEY is missing. Falling back to authenticated caller token.');
+  console.warn('[Notifications API] SUPABASE_SERVICE_ROLE_KEY is missing or unregistered. Falling back to authenticated caller token and publishable key.');
 }
 
 async function checkAdmin(req: VercelRequest) {
@@ -263,14 +282,37 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
 
   try {
     // 1. Get push tokens for targeted users
-    const { data: tokens, error } = await client
+    let tokens: any[] | null = null;
+    let tokenError: any = null;
+
+    const { data: primaryTokens, error: primaryError } = await client
       .from('push_tokens')
       .select('user_id, token')
       .in('user_id', userIds);
 
-    if (error) {
-      console.error('[Notifications API] Supabase error fetching tokens:', error);
-      return { success: false, reason: 'Erro ao consultar tokens no Supabase: ' + error.message, count: 0, usersCount: 0, tokensFound: 0 };
+    if (primaryError) {
+      console.warn('[Notifications API] Primary token fetch error, attempting fallback with anon client:', primaryError.message);
+      tokenError = primaryError;
+    } else {
+      tokens = primaryTokens;
+    }
+
+    // Fallback to supabaseAnonClient if primary client failed (e.g. key issue or token RLS)
+    if ((tokenError || !tokens) && client !== supabaseAnonClient) {
+      const { data: fallbackTokens, error: fallbackError } = await supabaseAnonClient
+        .from('push_tokens')
+        .select('user_id, token')
+        .in('user_id', userIds);
+
+      if (!fallbackError && fallbackTokens) {
+        tokens = fallbackTokens;
+        tokenError = null;
+      }
+    }
+
+    if (tokenError) {
+      console.error('[Notifications API] Supabase error fetching tokens:', tokenError);
+      return { success: false, reason: 'Erro ao consultar tokens no Supabase: ' + tokenError.message, count: 0, usersCount: 0, tokensFound: 0 };
     }
     
     if (!tokens || tokens.length === 0) {
@@ -510,20 +552,28 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
       });
 
     if (histErr) {
-      console.error('[Notifications API] Error inserting into notification_history:', histErr.message);
-      // Retry without custom ID in case default id generation is required
-      await client
+      console.warn('[Notifications API] Notice inserting into notification_history:', histErr.message);
+      // Retry with minimal columns without custom ID in case default id generation or column mismatch
+      const fallbackPayload: any = {
+        title: title || 'Notificação',
+        body: body || '',
+        target_count: targetUserIds.length,
+        status: 'sent',
+        type: resolvedType
+      };
+
+      const { error: retryErr } = await client
         .from('notification_history')
-        .insert({
-          title: title || 'Notificação',
-          body: body || '',
-          target_count: targetUserIds.length,
-          status: 'sent',
-          type: resolvedType
-        });
+        .insert(fallbackPayload);
+
+      if (retryErr && client !== supabaseAnonClient) {
+        await supabaseAnonClient
+          .from('notification_history')
+          .insert(fallbackPayload);
+      }
     }
-  } catch (histEx) {
-    console.error('[Notifications API] Exception inserting notification_history:', histEx);
+  } catch (histEx: any) {
+    console.warn('[Notifications API] Exception inserting notification_history:', histEx?.message || histEx);
   }
 
   // 2. Create internal notifications for each user linked to broadcastId (if not push-only)

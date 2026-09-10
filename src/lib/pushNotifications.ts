@@ -142,9 +142,13 @@ export async function setupPushInBackground(userId: string, messaging: any): Pro
 
       if (token) {
         // 1. Subscribe to topic & notify backend API
+        const { data: { session } } = await supabase.auth.getSession();
         safeFetch('/api/v1/notifications?action=sub-topic', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {})
+          },
           body: JSON.stringify({ userId, token, topic: 'all' })
         }).catch(e => console.warn('⚠️ Push sub-topic notification notice:', e));
 

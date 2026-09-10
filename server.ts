@@ -24,7 +24,17 @@ async function startServer() {
   Object.assign(process.env, env);
 
   // Clean invalid or placeholder keys
-  const isInvalidKey = (k?: string) => !k || k.trim() === '' || k.trim() === 'undefined' || k.trim() === 'null';
+  const isInvalidKey = (k?: string) => {
+    if (!k) return true;
+    const trimmed = k.trim();
+    return (
+      trimmed === '' || 
+      trimmed === 'undefined' || 
+      trimmed === 'null' || 
+      trimmed === 'placeholder-key'
+    );
+  };
+
   if (isInvalidKey(process.env.SUPABASE_SERVICE_ROLE_KEY)) {
     delete process.env.SUPABASE_SERVICE_ROLE_KEY;
   }
@@ -36,6 +46,33 @@ async function startServer() {
   }
   if (isInvalidKey(process.env.VITE_SUPABASE_SERVICE_ROLE_KEY)) {
     delete process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+  }
+
+  // Active validation probe: test whether SUPABASE_SERVICE_ROLE_KEY is registered for this Supabase project
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    try {
+      const targetUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+      if (targetUrl) {
+        const testRes = await fetch(`${targetUrl}/rest/v1/profiles?select=id&limit=1`, {
+          headers: {
+            apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+            Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`
+          }
+        });
+        if (!testRes.ok) {
+          const bodyTxt = await testRes.text();
+          if (bodyTxt.includes('Unregistered API key') || testRes.status === 401) {
+            console.warn('[Server Init] SUPABASE_SERVICE_ROLE_KEY is unregistered on this Supabase project. Clearing it so endpoints safely use valid publishable keys and user auth tokens.');
+            delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+            delete process.env.SUPABASE_SERVICE_KEY;
+            delete process.env.SUPABASE_SECRET_KEY;
+            delete process.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
+          }
+        }
+      }
+    } catch (probeErr) {
+      console.warn('[Server Init] Warning verifying SUPABASE_SERVICE_ROLE_KEY:', probeErr);
+    }
   }
   
   console.log('[Server Init] Loaded Env Vars:', Object.keys(env).filter(k => !k.includes('SECRET') && !k.includes('KEY')));
