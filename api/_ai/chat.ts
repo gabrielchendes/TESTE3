@@ -39,8 +39,19 @@ const supabaseAdmin = createClient(supabaseUrl || 'https://placeholder.supabase.
 
 let aiInstance: GoogleGenAI | null = null;
 
+export function getGeminiApiKey(): string {
+  const key =
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GEMINI_KEY ||
+    process.env.VITE_GEMINI_API_KEY ||
+    '';
+  return key.trim();
+}
+
 function getAiClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getGeminiApiKey();
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY environment variable is missing');
   }

@@ -2,11 +2,12 @@ import { GoogleGenAI } from '@google/genai';
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { safeParseAiJson } from '../_utils/parseAiJson';
 import { generateContentWithRetry } from '../_utils/geminiCallWithRetry';
+import { getGeminiApiKey } from './chat';
 
 let aiInstance: GoogleGenAI | null = null;
 
 function getAiClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = getGeminiApiKey();
   if (!apiKey) {
     throw new Error('GEMINI_API_KEY environment variable is missing');
   }
