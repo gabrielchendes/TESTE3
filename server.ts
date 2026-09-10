@@ -135,7 +135,7 @@ async function startServer() {
         'v1/hotmart-webhook': 'v1/hotmart-webhook',
         'v1/webhooks/hotmart': 'v1/hotmart-webhook',
         'v1/webhook-hotmart': 'v1/hotmart-webhook',
-        'v1/ai-chat': 'v1/ai?action=ai-chat',
+        'v1/ai-chat': 'v1/ai-chat',
         'v1/ai-course-editor': 'v1/ai?action=ai-course-editor',
         'v1/analyze-message': 'v1/ai?action=analyze-message',
         'v1/build-complete-course': 'v1/ai?action=build-complete-course',

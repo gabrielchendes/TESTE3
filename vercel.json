@@ -76,7 +76,7 @@
     },
     {
       "source": "/api/v1/ai-chat",
-      "destination": "/api/v1/ai?action=ai-chat"
+      "destination": "/api/v1/ai-chat"
     },
     {
       "source": "/api/v1/ai-course-editor",

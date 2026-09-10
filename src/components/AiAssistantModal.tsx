@@ -436,11 +436,13 @@ export default function AiAssistantModal({ userId, userEmail, userName, userAvat
         data = responseText ? JSON.parse(responseText) : {};
       } catch (parseErr) {
         console.error('Non-JSON response from AI chat:', responseText.substring(0, 200));
-        throw new Error(
-          res.ok
-            ? 'Resposta inválida do servidor.'
-            : `Erro no servidor (${res.status}). Por favor, tente novamente.`
-        );
+        let friendlyMsg = res.ok
+          ? 'Resposta inválida do servidor.'
+          : `Erro no servidor (${res.status}). Por favor, tente novamente.`;
+        if (responseText.includes('FUNCTION_INVOCATION_FAILED') || responseText.includes('A server error has occurred')) {
+          friendlyMsg = 'Erro de execução na Vercel (FUNCTION_INVOCATION_FAILED). Verifique as variáveis de ambiente ou logs do deploy.';
+        }
+        throw new Error(friendlyMsg);
       }
 
       if (!res.ok) {
