@@ -97,8 +97,31 @@ const supabaseAdmin = createClient(supabaseUrl || 'https://placeholder.supabase.
   }
 });
 
+function getClientForReq(req?: VercelRequest) {
+  if (supabaseServiceRoleKey) return supabaseAdmin;
+  const authHeader = req?.headers?.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    if (token && token.length > 20) {
+      return createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey || 'placeholder-key', {
+        global: {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        },
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        }
+      });
+    }
+  }
+  return supabaseAdmin;
+}
+
 if (!supabaseServiceRoleKey) {
-  console.warn('[Notifications API] SUPABASE_SERVICE_ROLE_KEY is missing. Operations on behalf of other users may fail due to RLS.');
+  console.warn('[Notifications API] SUPABASE_SERVICE_ROLE_KEY is missing. Falling back to authenticated caller token.');
 }
 
 async function checkAdmin(req: VercelRequest) {
@@ -108,8 +131,10 @@ async function checkAdmin(req: VercelRequest) {
   const token = authHeader.split(' ')[1];
   if (!token) return false;
 
+  const client = getClientForReq(req);
+
   try {
-    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
+    const { data: { user }, error } = await client.auth.getUser(token);
     
     if (error || !user) {
       // Fallback: Check if JWT payload contains admin email
@@ -137,8 +162,8 @@ async function checkAdmin(req: VercelRequest) {
     if (isHardcodedAdmin) return true;
 
     // Check profile and app_settings
-    const { data: profile } = await supabaseAdmin.from('profiles').select('is_admin').eq('id', user.id).single();
-    const { data: settings } = await supabaseAdmin.from('app_settings').select('admin_email').eq('id', 1).single();
+    const { data: profile } = await client.from('profiles').select('is_admin').eq('id', user.id).single();
+    const { data: settings } = await client.from('app_settings').select('admin_email').eq('id', 1).single();
     
     const isSuperAdmin = (settings?.admin_email && user.email?.toLowerCase() === settings.admin_email.toLowerCase()) || false;
     
@@ -231,14 +256,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-async function sendPushNotification(userIds: string[], title: string, body: string, customData?: Record<string, any>) {
+async function sendPushNotification(userIds: string[], title: string, body: string, customData?: Record<string, any>, client: any = supabaseAdmin) {
   if (!userIds || !userIds.length) {
     return { success: false, reason: 'Nenhum ID de usuário fornecido', count: 0, tokensFound: 0 };
   }
 
   try {
     // 1. Get push tokens for targeted users
-    const { data: tokens, error } = await supabaseAdmin
+    const { data: tokens, error } = await client
       .from('push_tokens')
       .select('user_id, token')
       .in('user_id', userIds);
@@ -259,10 +284,10 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
     }
 
     // Unique users with push enabled
-    const userIdsWithPush = Array.from(new Set(tokens.map(t => t.user_id).filter(Boolean)));
+    const userIdsWithPush: string[] = Array.from(new Set(tokens.map((t: any) => t.user_id).filter(Boolean)));
 
     // Unique tokens
-    const registrationTokens = Array.from(new Set(tokens.map(t => t.token).filter(Boolean)));
+    const registrationTokens: string[] = Array.from(new Set(tokens.map((t: any) => t.token).filter(Boolean))) as string[];
     if (registrationTokens.length === 0) {
       return { success: false, reason: 'Tokens inválidos ou vazios', count: 0, usersCount: 0, tokensFound: 0 };
     }
@@ -279,8 +304,8 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
       const targetUrl = customData?.url || customData?.link || '/';
 
       for (let i = 0; i < registrationTokens.length; i += BATCH_SIZE) {
-        const batchTokens = registrationTokens.slice(i, i + BATCH_SIZE);
-        const message = {
+        const batchTokens: string[] = registrationTokens.slice(i, i + BATCH_SIZE);
+        const message: any = {
           notification: { title, body },
           data: {
             title,
@@ -331,7 +356,7 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
         const BATCH_SIZE = 500;
         const targetUrl = customData?.url || customData?.link || '/';
         for (let i = 0; i < registrationTokens.length; i += BATCH_SIZE) {
-          const batchTokens = registrationTokens.slice(i, i + BATCH_SIZE);
+          const batchTokens: string[] = registrationTokens.slice(i, i + BATCH_SIZE);
           const fcmResponse = await fetch('https://fcm.googleapis.com/fcm/send', {
             method: 'POST',
             headers: {
@@ -388,11 +413,11 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
     
     // Clean up stale tokens asynchronously
     if (failedTokens.length > 0) {
-      supabaseAdmin
+      client
         .from('push_tokens')
         .delete()
         .in('token', failedTokens)
-        .then(({ error: delErr }) => {
+        .then(({ error: delErr }: any) => {
           if (delErr) console.warn('[Notifications API] Error cleaning failed tokens:', delErr);
         });
     }
@@ -412,25 +437,27 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
 }
 
 async function handleTestPush(req: VercelRequest, res: VercelResponse) {
+  const client = getClientForReq(req);
   const { title = 'Teste de Notificação Push 🚀', body = 'Seu dispositivo está configurado e recebendo notificações com sucesso!' } = req.body;
   
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ error: 'Não autenticado' });
   
   const token = authHeader.split(' ')[1];
-  const { data: { user }, error: userErr } = await supabaseAdmin.auth.getUser(token);
+  const { data: { user }, error: userErr } = await client.auth.getUser(token);
   if (userErr || !user) return res.status(401).json({ error: 'Sessão inválida' });
 
-  const pushResult = await sendPushNotification([user.id], title, body, { test: 'true' });
+  const pushResult = await sendPushNotification([user.id], title, body, { test: 'true' }, client);
   return res.status(200).json({ success: true, pushResult });
 }
 
 async function handlePushStatus(req: VercelRequest, res: VercelResponse) {
+  const client = getClientForReq(req);
   const hasServiceAccount = !!process.env.FIREBASE_SERVICE_ACCOUNT;
   const hasServerKey = !!process.env.FIREBASE_SERVER_KEY;
   const isAdminInitialized = getApps().length > 0;
 
-  const { count: tokenCount, error } = await supabaseAdmin
+  const { count: tokenCount, error } = await client
     .from('push_tokens')
     .select('*', { count: 'exact', head: true });
 
@@ -445,6 +472,7 @@ async function handlePushStatus(req: VercelRequest, res: VercelResponse) {
 }
 
 async function handlePush(req: VercelRequest, res: VercelResponse) {
+  const client = getClientForReq(req);
   const { title, body, userIds, userId, type, sendInApp, skipPush = false, data } = req.body || {};
   
   let targetUserIds: string[] = [];
@@ -469,7 +497,7 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
 
   // 1. Create broadcast history record
   try {
-    const { error: histErr } = await supabaseAdmin
+    const { error: histErr } = await client
       .from('notification_history')
       .insert({
         id: broadcastId,
@@ -484,7 +512,7 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
     if (histErr) {
       console.error('[Notifications API] Error inserting into notification_history:', histErr.message);
       // Retry without custom ID in case default id generation is required
-      await supabaseAdmin
+      await client
         .from('notification_history')
         .insert({
           title: title || 'Notificação',
@@ -515,7 +543,7 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
           created_at: nowIso
         }));
 
-        const { error: richErr } = await supabaseAdmin
+        const { error: richErr } = await client
           .from('notifications')
           .insert(richRows);
 
@@ -529,7 +557,7 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
             created_at: nowIso
           }));
 
-          const { error: stdErr } = await supabaseAdmin
+          const { error: stdErr } = await client
             .from('notifications')
             .insert(standardRows);
 
@@ -540,7 +568,7 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
               title: title || 'Notificação',
               body: body || ''
             }));
-            await supabaseAdmin.from('notifications').insert(minimalRows);
+            await client.from('notifications').insert(minimalRows);
           }
         }
       }
@@ -557,7 +585,7 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
       broadcastId,
       url: data?.url || '/'
     };
-    pushResult = await sendPushNotification(targetUserIds, title || 'Notificação', body || '', customData);
+    pushResult = await sendPushNotification(targetUserIds, title || 'Notificação', body || '', customData, client);
   }
 
   const historyItem = {
@@ -581,6 +609,7 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
 }
 
 async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
+  const client = getClientForReq(req);
   const { title, body, data } = req.body || {};
   
   console.log('🔔 [Notifications API] handleNotifyAdmin recebido:', { title, body, data });
@@ -592,7 +621,7 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
   try {
     // Primary: Profiles explicitly marked as admin (using standard schema columns)
     let profiles: any[] | null = null;
-    const { data: pData, error: pErr } = await supabaseAdmin
+    const { data: pData, error: pErr } = await client
       .from('profiles')
       .select('id, email, is_admin');
     
@@ -600,7 +629,7 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
       profiles = pData;
     } else {
       // Fallback: select id and email
-      const { data: fallbackProfiles } = await supabaseAdmin
+      const { data: fallbackProfiles } = await client
         .from('profiles')
         .select('id, email');
       profiles = fallbackProfiles || [];
@@ -616,7 +645,7 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
     }
 
     // Secondary: Master admin from settings
-    const { data: settings } = await supabaseAdmin
+    const { data: settings } = await client
       .from('app_settings')
       .select('admin_email')
       .limit(1)
@@ -677,7 +706,7 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
 
   // 1. Log in notification_history so Admin can track all classroom questions & community activity in Central de Notificações
   try {
-    await supabaseAdmin
+    await client
       .from('notification_history')
       .insert({
         id: broadcastId,
@@ -703,7 +732,7 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
       created_at: nowIso
     }));
 
-    const { error: insertError } = await supabaseAdmin
+    const { error: insertError } = await client
       .from('notifications')
       .insert(richRows);
 
@@ -717,7 +746,7 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
         created_at: nowIso
       }));
 
-      const { error: stdErr } = await supabaseAdmin
+      const { error: stdErr } = await client
         .from('notifications')
         .insert(stdRows);
 
@@ -728,7 +757,7 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
           title: finalTitle,
           body: finalBody
         }));
-        await supabaseAdmin.from('notifications').insert(minRows);
+        await client.from('notifications').insert(minRows);
       }
     }
   } catch (err) {
@@ -749,7 +778,8 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
       adminIds, 
       finalTitle, 
       finalBody, 
-      pushPayloadData
+      pushPayloadData,
+      client
     );
     console.log('🚀 [Notifications API] Resultado do envio Push para admins:', pushResult);
   } catch (err) {
@@ -766,11 +796,12 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
 }
 
 async function handleHistory(req: VercelRequest, res: VercelResponse) {
+  const client = getClientForReq(req);
   try {
     // 1. Fetch from notification_history table
     let historyList: any[] = [];
     try {
-      const { data: hist, error: histErr } = await supabaseAdmin
+      const { data: hist, error: histErr } = await client
         .from('notification_history')
         .select('*')
         .order('created_at', { ascending: false })
@@ -786,7 +817,7 @@ async function handleHistory(req: VercelRequest, res: VercelResponse) {
     // 2. Fetch notifications from notifications table (for live read counts and recovery)
     let allNotifications: any[] = [];
     try {
-      const { data: notifs, error: notifErr } = await supabaseAdmin
+      const { data: notifs, error: notifErr } = await client
         .from('notifications')
         .select('id, user_id, broadcast_id, title, body, message, is_read, read, read_at, created_at')
         .order('created_at', { ascending: false })
@@ -907,10 +938,11 @@ async function handleHistory(req: VercelRequest, res: VercelResponse) {
 }
 
 async function handleClear(req: VercelRequest, res: VercelResponse) {
+  const client = getClientForReq(req);
   try {
     // Delete notifications associated with broadcasts or all general notifications
     try {
-      await supabaseAdmin
+      await client
         .from('notifications')
         .delete()
         .not('broadcast_id', 'is', null);
@@ -919,7 +951,7 @@ async function handleClear(req: VercelRequest, res: VercelResponse) {
     }
 
     try {
-      await supabaseAdmin
+      await client
         .from('notification_history')
         .delete()
         .neq('id', '00000000-0000-0000-0000-000000000000');
@@ -934,13 +966,14 @@ async function handleClear(req: VercelRequest, res: VercelResponse) {
 }
 
 async function handleSubTopic(req: VercelRequest, res: VercelResponse) {
+  const client = getClientForReq(req);
   const { userId, token, topic = 'all' } = req.body;
   if (!token) return res.status(400).json({ error: 'Missing token parameter' });
   
   // Register or update token in database
   if (userId) {
     try {
-      await supabaseAdmin.from('push_tokens').upsert({
+      await client.from('push_tokens').upsert({
         user_id: userId,
         token: token,
         platform: 'web'
@@ -964,13 +997,14 @@ async function handleSubTopic(req: VercelRequest, res: VercelResponse) {
 }
 
 async function handleDetails(req: VercelRequest, res: VercelResponse, id: string) {
+  const client = getClientForReq(req);
   if (!id) return res.status(400).json({ error: 'Missing broadcast id parameter' });
   
   try {
     let notificationsData: any[] = [];
     
     // 1. Attempt lookup by broadcast_id
-    const { data: bData, error: bErr } = await supabaseAdmin
+    const { data: bData, error: bErr } = await client
       .from('notifications')
       .select('id, user_id, is_read, read, read_at, created_at, title, body')
       .eq('broadcast_id', id)
@@ -986,7 +1020,7 @@ async function handleDetails(req: VercelRequest, res: VercelResponse, id: string
       const parts = raw.split('___');
       const title = parts[0];
       
-      const { data: gData } = await supabaseAdmin
+      const { data: gData } = await client
         .from('notifications')
         .select('id, user_id, is_read, read, read_at, created_at, title, body')
         .eq('title', title)
@@ -1000,14 +1034,14 @@ async function handleDetails(req: VercelRequest, res: VercelResponse, id: string
     // 3. Attempt lookup via notification_history title matching
     if (notificationsData.length === 0) {
       try {
-        const { data: histRecord } = await supabaseAdmin
+        const { data: histRecord } = await client
           .from('notification_history')
           .select('title, created_at')
           .eq('id', id)
           .single();
 
         if (histRecord?.title) {
-          const { data: tData } = await supabaseAdmin
+          const { data: tData } = await client
             .from('notifications')
             .select('id, user_id, is_read, read, read_at, created_at, title, body')
             .eq('title', histRecord.title)
@@ -1022,7 +1056,7 @@ async function handleDetails(req: VercelRequest, res: VercelResponse, id: string
 
     // 4. Attempt lookup by single notification ID
     if (notificationsData.length === 0) {
-      const { data: directData } = await supabaseAdmin
+      const { data: directData } = await client
         .from('notifications')
         .select('id, user_id, is_read, read, read_at, created_at, title, body')
         .eq('id', id);
@@ -1045,7 +1079,7 @@ async function handleDetails(req: VercelRequest, res: VercelResponse, id: string
       for (let i = 0; i < userIds.length; i += CHUNK_SIZE) {
         const chunk = userIds.slice(i, i + CHUNK_SIZE);
         try {
-          const { data: profiles } = await supabaseAdmin
+          const { data: profiles } = await client
             .from('profiles')
             .select('id, full_name, email, avatar_url')
             .in('id', chunk);

@@ -111,11 +111,22 @@ export default function App() {
         
         if (error) {
           console.warn('Session check note:', error.message);
-          // Only clear if the refresh token is explicitly dead and cannot be recovered
-          if (error.message.includes('Refresh Token Not Found') || error.message.includes('invalid_grant')) {
+          // Clear if the refresh token is dead, not found, or invalid
+          const msg = error.message || '';
+          if (
+            msg.includes('Refresh Token Not Found') ||
+            msg.includes('Invalid Refresh Token') ||
+            msg.includes('invalid_grant') ||
+            msg.includes('refresh_token_not_found')
+          ) {
             console.warn('Handling expired refresh token cleanly...');
             try {
               localStorage.removeItem('maternidade_premium_auth');
+              Object.keys(localStorage).forEach(k => {
+                if (k.startsWith('sb-') && k.endsWith('-auth-token')) {
+                  localStorage.removeItem(k);
+                }
+              });
             } catch (e) {}
           }
           setUser(null);

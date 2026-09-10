@@ -22,6 +22,22 @@ export const isSupabaseConfigured = !!(
 
 const AUTH_STORAGE_KEY = 'maternidade_premium_auth';
 
+// Clear any stale/corrupted auth tokens immediately on module evaluation if flagged
+if (typeof window !== 'undefined') {
+  try {
+    const rawAuth = window.localStorage.getItem(AUTH_STORAGE_KEY);
+    if (rawAuth) {
+      const parsed = JSON.parse(rawAuth);
+      // If the session has no refresh token or has an expired refresh token without access token
+      if (!parsed?.refresh_token && !parsed?.currentSession?.refresh_token) {
+        window.localStorage.removeItem(AUTH_STORAGE_KEY);
+      }
+    }
+  } catch {
+    try { window.localStorage.removeItem(AUTH_STORAGE_KEY); } catch {}
+  }
+}
+
 // Safe localStorage wrapper for Supabase auth that clears dead or corrupted tokens
 const customAuthStorage = {
   getItem: (key: string): string | null => {
@@ -34,6 +50,12 @@ const customAuthStorage = {
         const parsed = JSON.parse(item);
         // If it was marked as invalid, ignore it
         if (parsed?.invalid_refresh) {
+          window.localStorage.removeItem(key);
+          return null;
+        }
+        // If token has no valid refresh token structure, drop it to prevent "Refresh Token Not Found"
+        const refreshToken = parsed?.refresh_token || parsed?.currentSession?.refresh_token;
+        if (typeof refreshToken === 'string' && refreshToken.trim() === '') {
           window.localStorage.removeItem(key);
           return null;
         }

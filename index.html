@@ -3,6 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <script>
+      // Purge invalid/corrupted auth tokens immediately before any JS bundles run
+      (function() {
+        try {
+          var authKey = 'maternidade_premium_auth';
+          var raw = window.localStorage.getItem(authKey);
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            if (!parsed || (!parsed.refresh_token && !parsed.currentSession?.refresh_token)) {
+              window.localStorage.removeItem(authKey);
+            }
+          }
+        } catch (e) {
+          try { window.localStorage.removeItem('maternidade_premium_auth'); } catch (_) {}
+        }
+      })();
+
       // Global error listeners to intercept cross-origin "Script error." and PWA/analytics exceptions early
       (function() {
         function checkBenign(msg, src) {
@@ -14,6 +30,11 @@
             message.indexOf('[vite]') !== -1 ||
             message.indexOf('Script error') !== -1 || 
             message.toLowerCase().indexOf('script error') !== -1 ||
+            message.indexOf('Refresh Token Not Found') !== -1 ||
+            message.indexOf('Invalid Refresh Token') !== -1 ||
+            message.indexOf('invalid_grant') !== -1 ||
+            message.indexOf('AuthApiError') !== -1 ||
+            message.indexOf('AuthSessionMissingError') !== -1 ||
             message.indexOf('Failed to fetch dynamically imported module') !== -1 ||
             message.indexOf('NetworkError when attempting to fetch resource') !== -1 ||
             message.indexOf('NetworkError') !== -1 ||
@@ -29,7 +50,7 @@
 
         // 1. Classic onerror handler
         window.onerror = function(message, source, lineno, colno, error) {
-          if (checkBenign(message, source)) {
+          if (checkBenign(message, source) || (error && checkBenign(error.message, source))) {
             console.warn('⚠️ Suppressed early window.onerror:', message, 'from:', source);
             return true; // Prevents the error from propagating
           }
@@ -38,7 +59,7 @@
 
         // 2. Modern event listener with capture and stopPropagation
         window.addEventListener('error', function(event) {
-          var msg = event.message || '';
+          var msg = event.message || (event.error && event.error.message) || '';
           var src = event.filename || '';
           if (checkBenign(msg, src)) {
             console.warn('⚠️ Suppressed early error event:', msg, 'from:', src);
@@ -55,19 +76,15 @@
           var reason = event.reason;
           var msg = reason ? String(reason.message || reason) : '';
           var isBenign = 
+            checkBenign(msg, '') ||
             msg.indexOf('WebSocket') !== -1 ||
             msg.indexOf('websocket') !== -1 ||
             msg.indexOf('[vite]') !== -1 ||
             msg.indexOf('Refresh Token Not Found') !== -1 || 
             msg.indexOf('invalid_grant') !== -1 || 
             msg.indexOf('Invalid Refresh Token') !== -1 ||
-            msg.indexOf('Script error') !== -1 || 
-            msg.toLowerCase().indexOf('script error') !== -1 ||
-            msg.indexOf('Failed to fetch dynamically imported module') !== -1 ||
-            msg.indexOf('NetworkError when attempting to fetch resource') !== -1 ||
-            msg.indexOf('NetworkError') !== -1 ||
-            msg.indexOf('Failed to fetch') !== -1 ||
-            msg.indexOf('Load failed') !== -1 ||
+            msg.indexOf('AuthApiError') !== -1 ||
+            msg.indexOf('AuthSessionMissingError') !== -1 ||
             !msg;
 
           if (isBenign) {
@@ -78,12 +95,12 @@
               event.stopImmediatePropagation();
             } catch(e) {}
 
-            if (msg.indexOf('Refresh Token Not Found') !== -1 || msg.indexOf('Invalid Refresh Token') !== -1 || msg.indexOf('invalid_grant') !== -1) {
+            if (msg.indexOf('Refresh Token Not Found') !== -1 || msg.indexOf('Invalid Refresh Token') !== -1 || msg.indexOf('invalid_grant') !== -1 || msg.indexOf('AuthApiError') !== -1) {
               try {
                 window.localStorage.removeItem('maternidade_premium_auth');
                 for (var i = 0; i < window.localStorage.length; i++) {
                   var k = window.localStorage.key(i);
-                  if (k && k.indexOf('auth') !== -1) {
+                  if (k && (k.indexOf('auth') !== -1 || (k.indexOf('sb-') === 0 && k.indexOf('-auth-token') !== -1))) {
                     window.localStorage.removeItem(k);
                   }
                 }
