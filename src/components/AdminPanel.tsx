@@ -90,6 +90,7 @@ import { useI18n } from '../contexts/I18nContext';
 import { safeParse, safeFetch } from '../lib/utils';
 import { dataCache } from '../lib/cache';
 import { lazyWithRetry } from '../lib/lazyWithRetry';
+import { languagePresets } from '../constants/languagePresets';
 
 const CourseEditor = lazyWithRetry(() => import('./CourseEditor'));
 const CourseViewer = lazyWithRetry(() => import('./CourseViewer'));
@@ -98,55 +99,89 @@ const PackageEditor = lazyWithRetry(() => import('./PackageEditor'));
 const AiCourseFactoryModal = lazyWithRetry(() => import('./AiCourseFactoryModal').then(m => ({ default: m.AiCourseFactoryModal })));
 const AiCourseEditModal = lazyWithRetry(() => import('./AiCourseEditModal').then(m => ({ default: m.AiCourseEditModal })));
 
-const RotatingBannerPreview = ({ images, interval = 5000 }: { images: string[], interval?: number }) => {
-  const [currentIndex, setCurrentIndex] = useState(0);
-
-  const validImages = (images || []).filter(img => Boolean(img && img.trim()));
-
-  useEffect(() => {
-    if (!validImages || validImages.length <= 1) return;
-    const timer = setInterval(() => {
-      setCurrentIndex((prev) => (prev + 1) % validImages.length);
-    }, interval);
-    return () => clearInterval(timer);
-  }, [validImages.length, interval]);
-
-  if (!validImages || validImages.length === 0) {
-    return (
-      <div className="w-full h-full flex flex-col items-center justify-center text-gray-700 bg-black/40">
-        <Layout size={48} className="mb-2 opacity-20" />
-        <p className="text-[10px] font-black uppercase tracking-widest opacity-40">Sem Imagens</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative w-full h-full">
-      <AnimatePresence mode="wait">
-        <motion.img
-          key={currentIndex}
-          src={validImages[currentIndex]}
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
-          transition={{ duration: 0.5 }}
-          className="w-full h-full object-cover"
-          referrerPolicy="no-referrer"
+const CourseAdminCard = ({ course, courseStats, setViewingCourseId, setEditingCourseId, setShowCourseEditor, onDelete, onMove, onAiEdit }: any) => (
+  <div className="bg-zinc-900 border border-white/5 rounded-xl overflow-hidden group hover:border-blue-500/50 transition-all flex flex-col w-36 sm:w-44 shrink-0 shadow-2xl">
+    <div className="relative aspect-[2/3] overflow-hidden shrink-0">
+      {course.cover_url?.trim() ? (
+        <img 
+          src={course.cover_url.trim()} 
+          alt={course.title} 
+          className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" 
+          referrerPolicy="no-referrer" 
         />
-      </AnimatePresence>
-      <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-1.5">
-        {validImages.map((_, i) => (
-          <div 
-            key={i} 
-            className={`h-1 rounded-full transition-all ${i === currentIndex ? 'w-4 bg-blue-500' : 'w-1 bg-white/20'}`} 
-          />
-        ))}
+      ) : (
+        <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
+          <BookOpen className="text-zinc-600" size={24} />
+        </div>
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent opacity-80" />
+      
+      <div className="absolute inset-x-0 bottom-0 p-3 space-y-1">
+        <h4 className="font-black text-[10px] sm:text-xs text-white leading-tight line-clamp-2 drop-shadow-md uppercase italic">
+          {course.title}
+        </h4>
+        <div className="text-[8px] font-black text-blue-500 uppercase tracking-tighter drop-shadow-md flex items-center gap-1">
+          {course.is_bonus ? 'BÔNUS 🎁' : course.is_free ? 'PRODUTO PRINCIPAL 💎' : 'PREMIUM'}
+          {course.is_package_exclusive_bonus && (
+             <div className={`${course.is_bonus ? 'bg-purple-600' : 'bg-emerald-600'} p-0.5 rounded shadow-sm border ${course.is_bonus ? 'border-purple-400/50' : 'border-emerald-400/50'}`} title="Liberado via Pacote">
+               <LockIcon size={8} className="text-white" />
+             </div>
+          )}
+        </div>
+      </div>
+
+      {/* Admin floating controls */}
+      <div className="absolute top-2 right-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+        <button 
+          onClick={() => onAiEdit?.(course)}
+          className="p-1.5 bg-gradient-to-r from-amber-500 to-rose-500 hover:brightness-110 text-white rounded-lg backdrop-blur-md transition-all shadow-lg"
+          title="Editar com IA"
+        >
+          <Sparkles size={14} />
+        </button>
+        <button 
+          onClick={() => setViewingCourseId(course.id)}
+          className="p-1.5 bg-white/20 hover:bg-white text-white hover:text-black rounded-lg backdrop-blur-md transition-all shadow-lg"
+          title="Visualizar Grade"
+        >
+          <Eye size={14} />
+        </button>
+        <button 
+          onClick={() => { setEditingCourseId(course.id); setShowCourseEditor(true); }}
+          className="p-1.5 bg-white/20 hover:bg-white text-white hover:text-black rounded-lg backdrop-blur-md transition-all shadow-lg"
+          title="Editar Curso"
+        >
+          <Edit3 size={14} />
+        </button>
+        <button 
+          onClick={() => onDelete(course.id, course.title, !course.is_bonus && !course.is_free)}
+          className="p-1.5 bg-red-500/80 hover:bg-red-500 text-white rounded-lg backdrop-blur-md transition-all shadow-lg"
+          title="Excluir"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+
+      {/* Move arrows */}
+      <div className="absolute bottom-2 right-2 flex gap-1 opacity-100 transition-opacity">
+        <button 
+          onClick={(e) => { e.stopPropagation(); onMove(course.id, 'up'); }}
+          className="p-1 sm:p-1.5 bg-black/60 hover:bg-blue-600 text-white rounded-lg backdrop-blur-md transition-all border border-white/20 shadow-xl"
+          title="Mover para esquerda"
+        >
+          <ChevronLeft size={16} strokeWidth={3} />
+        </button>
+        <button 
+          onClick={(e) => { e.stopPropagation(); onMove(course.id, 'down'); }}
+          className="p-1 sm:p-1.5 bg-black/60 hover:bg-blue-600 text-white rounded-lg backdrop-blur-md transition-all border border-white/20 shadow-xl"
+          title="Mover para direita"
+        >
+          <ChevronRight size={16} strokeWidth={3} />
+        </button>
       </div>
     </div>
-  );
-};
-
-import { languagePresets } from '../constants/languagePresets';
+  </div>
+);
 
 interface AdminPanelProps {
   user: User;
@@ -265,27 +300,6 @@ export default function AdminPanel({ user }: AdminPanelProps) {
   const [mainCheckoutUrlInput, setMainCheckoutUrlInput] = useState('');
   const [savingMainProduct, setSavingMainProduct] = useState(false);
 
-  const handleSaveMainProduct = async () => {
-    try {
-      setSavingMainProduct(true);
-      const newCustomTexts = {
-        ...settings.custom_texts,
-        main_product_id: mainProductIdInput.trim(),
-        main_price: mainPriceInput.trim(),
-        main_checkout_url: mainCheckoutUrlInput.trim(),
-      };
-      await updateSettings({ 
-        custom_texts: newCustomTexts,
-        main_course_hotmart_id: mainProductIdInput.trim()
-      });
-      setShowMainProductModal(false);
-    } catch (err: any) {
-      toast.error('Erro ao salvar as configurações: ' + err.message);
-    } finally {
-      setSavingMainProduct(false);
-    }
-  };
-
   // Official Sales Dashboard states
   const [salesList, setSalesList] = useState<any[]>([]);
   const [salesMetrics, setSalesMetrics] = useState<any>({
@@ -312,6 +326,72 @@ export default function AdminPanel({ user }: AdminPanelProps) {
 
   // Payload detail modal state
   const [selectedSaleDetail, setSelectedSaleDetail] = useState<any | null>(null);
+
+  // Admin password states
+  const [adminPassword, setAdminPassword] = useState('');
+  const [newAdminPassword, setNewAdminPassword] = useState('');
+  const [confirmAdminPassword, setConfirmAdminPassword] = useState('');
+  const [updatingPassword, setUpdatingPassword] = useState(false);
+
+  // User detail states
+  const [userNewPassword, setUserNewPassword] = useState('');
+  const [isChangingUserPassword, setIsChangingUserPassword] = useState(false);
+  const [isUpdatingUserAi, setIsUpdatingUserAi] = useState(false);
+
+  // User management states
+  const [showUserCreator, setShowUserCreator] = useState(false);
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('123456');
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserCountryCode, setNewUserCountryCode] = useState('55');
+  const [newUserPhone, setNewUserPhone] = useState('');
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [deletingUser, setDeletingUser] = useState(false);
+
+  // View states
+  const [view, setView] = useState<'list' | 'user_details'>('list');
+  const [confirmationModal, setConfirmationModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    confirmText?: string;
+    cancelText?: string;
+    type: 'danger' | 'info';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    type: 'danger'
+  });
+
+  // Settings local states
+  const [localSettings, setLocalSettings] = useState<any>(null);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [draftCustomTexts, setDraftCustomTexts] = useState<Record<string, string>>({});
+  const [isSavingPages, setIsSavingPages] = useState(false);
+
+  const handleSaveMainProduct = async () => {
+    try {
+      setSavingMainProduct(true);
+      const newCustomTexts = {
+        ...settings.custom_texts,
+        main_product_id: mainProductIdInput.trim(),
+        main_price: mainPriceInput.trim(),
+        main_checkout_url: mainCheckoutUrlInput.trim(),
+      };
+      await updateSettings({ 
+        custom_texts: newCustomTexts,
+        main_course_hotmart_id: mainProductIdInput.trim()
+      });
+      setShowMainProductModal(false);
+    } catch (err: any) {
+      toast.error('Erro ao salvar as configurações: ' + err.message);
+    } finally {
+      setSavingMainProduct(false);
+    }
+  };
 
   const fetchSalesData = async () => {
     setLoadingSales(true);
@@ -435,15 +515,6 @@ export default function AdminPanel({ user }: AdminPanelProps) {
     }
   };
 
-  const [newAdminPassword, setNewAdminPassword] = useState('');
-  const [confirmAdminPassword, setConfirmAdminPassword] = useState('');
-  const [updatingPassword, setUpdatingPassword] = useState(false);
-
-  // User detail states
-  const [userNewPassword, setUserNewPassword] = useState('');
-  const [isChangingUserPassword, setIsChangingUserPassword] = useState(false);
-  const [isUpdatingUserAi, setIsUpdatingUserAi] = useState(false);
-
   const handleToggleUserUnlimitedAi = async (targetUser: any) => {
     if (!targetUser?.id) return;
     setIsUpdatingUserAi(true);
@@ -457,40 +528,6 @@ export default function AdminPanel({ user }: AdminPanelProps) {
       setIsUpdatingUserAi(false);
     }
   };
-
-  // User management states
-  const [showUserCreator, setShowUserCreator] = useState(false);
-  const [newUserEmail, setNewUserEmail] = useState('');
-  const [newUserPassword, setNewUserPassword] = useState('123456');
-  const [newUserName, setNewUserName] = useState('');
-  const [newUserCountryCode, setNewUserCountryCode] = useState('55');
-  const [newUserPhone, setNewUserPhone] = useState('');
-  const [creatingUser, setCreatingUser] = useState(false);
-  const [deletingUser, setDeletingUser] = useState(false);
-
-  // View states
-  const [view, setView] = useState<'list' | 'user_details'>('list');
-  const [confirmationModal, setConfirmationModal] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-    onConfirm: () => void;
-    confirmText?: string;
-    cancelText?: string;
-    type: 'danger' | 'info';
-  }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: () => {},
-    type: 'danger'
-  });
-
-  // Settings local states
-  const [localSettings, setLocalSettings] = useState<any>(null);
-  const [isSavingSettings, setIsSavingSettings] = useState(false);
-  const [draftCustomTexts, setDraftCustomTexts] = useState<Record<string, string>>({});
-  const [isSavingPages, setIsSavingPages] = useState(false);
 
   const handleMoveCourse = async (courseId: string, direction: 'up' | 'down') => {
     // Determine the category of the course to move locally within its filter
@@ -546,90 +583,6 @@ export default function AdminPanel({ user }: AdminPanelProps) {
       fetchData(); // Rollback
     }
   };
-
-   const CourseAdminCard = ({ course, courseStats, setViewingCourseId, setEditingCourseId, setShowCourseEditor, onDelete, onMove, onAiEdit }: any) => (
-    <div className="bg-zinc-900 border border-white/5 rounded-xl overflow-hidden group hover:border-blue-500/50 transition-all flex flex-col w-36 sm:w-44 shrink-0 shadow-2xl">
-      <div className="relative aspect-[2/3] overflow-hidden shrink-0">
-        {course.cover_url?.trim() ? (
-          <img 
-            src={course.cover_url.trim()} 
-            alt={course.title} 
-            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" 
-            referrerPolicy="no-referrer" 
-          />
-        ) : (
-          <div className="w-full h-full bg-zinc-800 flex items-center justify-center">
-            <BookOpen className="text-zinc-600" size={24} />
-          </div>
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent opacity-80" />
-        
-        <div className="absolute inset-x-0 bottom-0 p-3 space-y-1">
-          <h4 className="font-black text-[10px] sm:text-xs text-white leading-tight line-clamp-2 drop-shadow-md uppercase italic">
-            {course.title}
-          </h4>
-          <div className="text-[8px] font-black text-blue-500 uppercase tracking-tighter drop-shadow-md flex items-center gap-1">
-            {course.is_bonus ? 'BÔNUS 🎁' : course.is_free ? 'PRODUTO PRINCIPAL 💎' : 'PREMIUM'}
-            {course.is_package_exclusive_bonus && (
-               <div className={`${course.is_bonus ? 'bg-purple-600' : 'bg-emerald-600'} p-0.5 rounded shadow-sm border ${course.is_bonus ? 'border-purple-400/50' : 'border-emerald-400/50'}`} title="Liberado via Pacote">
-                 <LockIcon size={8} className="text-white" />
-               </div>
-            )}
-          </div>
-        </div>
-
-        {/* Admin floating controls */}
-        <div className="absolute top-2 right-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-          <button 
-            onClick={() => onAiEdit?.(course)}
-            className="p-1.5 bg-gradient-to-r from-amber-500 to-rose-500 hover:brightness-110 text-white rounded-lg backdrop-blur-md transition-all shadow-lg"
-            title="Editar com IA"
-          >
-            <Sparkles size={14} />
-          </button>
-          <button 
-            onClick={() => setViewingCourseId(course.id)}
-            className="p-1.5 bg-white/20 hover:bg-white text-white hover:text-black rounded-lg backdrop-blur-md transition-all shadow-lg"
-            title="Visualizar Grade"
-          >
-            <Eye size={14} />
-          </button>
-          <button 
-            onClick={() => { setEditingCourseId(course.id); setShowCourseEditor(true); }}
-            className="p-1.5 bg-white/20 hover:bg-white text-white hover:text-black rounded-lg backdrop-blur-md transition-all shadow-lg"
-            title="Editar Curso"
-          >
-            <Edit3 size={14} />
-          </button>
-          <button 
-            onClick={() => onDelete(course.id, course.title, !course.is_bonus && !course.is_free)}
-            className="p-1.5 bg-red-500/80 hover:bg-red-500 text-white rounded-lg backdrop-blur-md transition-all shadow-lg"
-            title="Excluir"
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
-
-        {/* Move arrows */}
-        <div className="absolute bottom-2 right-2 flex gap-1 opacity-100 transition-opacity">
-          <button 
-            onClick={(e) => { e.stopPropagation(); onMove(course.id, 'up'); }}
-            className="p-1 sm:p-1.5 bg-black/60 hover:bg-blue-600 text-white rounded-lg backdrop-blur-md transition-all border border-white/20 shadow-xl"
-            title="Mover para esquerda"
-          >
-            <ChevronLeft size={16} strokeWidth={3} />
-          </button>
-          <button 
-            onClick={(e) => { e.stopPropagation(); onMove(course.id, 'down'); }}
-            className="p-1 sm:p-1.5 bg-black/60 hover:bg-blue-600 text-white rounded-lg backdrop-blur-md transition-all border border-white/20 shadow-xl"
-            title="Mover para direita"
-          >
-            <ChevronRight size={16} strokeWidth={3} />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 
   useEffect(() => {
     if (settings && !localSettings) {
@@ -724,7 +677,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
         chaptersData.forEach((ch: any) => {
           const courseId = ch.modules.course_id;
           if (!stats[courseId]) stats[courseId] = { lessons: 0, materials: 0 };
-          if (ch.content_type === 'video') stats[courseId].lessons++;
+          if (ch.content_type === 'video' || ch.content_type === 'audio') stats[courseId].lessons++;
           else stats[courseId].materials++;
         });
         setCourseStats(stats);
@@ -1156,8 +1109,6 @@ export default function AdminPanel({ user }: AdminPanelProps) {
       setIsTestingWebhookUrl(false);
     }
   };
-
-  const [adminPassword, setAdminPassword] = useState('');
 
   const saveAuthSettings = async () => {
     try {

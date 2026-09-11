@@ -36,7 +36,8 @@ import {
   AlertTriangle,
   CheckSquare,
   Wand2,
-  Puzzle
+  Puzzle,
+  Headphones
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Course, Module, Chapter, Checklist } from '../types/lms';
@@ -50,7 +51,7 @@ import { AiCourseGeneratorModal } from './AiCourseGeneratorModal';
 import { AiCourseEditModal } from './AiCourseEditModal';
 import { AiCourseFactoryModal } from './AiCourseFactoryModal';
 import { fetchChecklistByChapterId, saveChecklistToDatabase } from '../services/checklistService';
-import { formatHtmlAppContent, fromDbChapter, isHtmlAppChapter } from '../utils/htmlAppHelper';
+import { formatHtmlAppContent, fromDbChapter, isHtmlAppChapter, prepareChapterForDb } from '../utils/htmlAppHelper';
 import ImageCropperModal from './ImageCropperModal';
 import { dataCache } from '../lib/cache';
 
@@ -284,13 +285,15 @@ export default function CourseEditor({
           if (newMod && mod.chapters?.length) {
             for (let cIdx = 0; cIdx < mod.chapters.length; cIdx++) {
               const ch = mod.chapters[cIdx];
+              const { content_type: dbContentType, rich_text: dbRichText } = prepareChapterForDb(ch);
               const { data: newChap, error: chapError } = await supabase
                 .from('chapters')
                 .insert([{
                   module_id: newMod.id,
                   title: ch.title,
                   description: ch.description || '',
-                  content_type: ch.content_type || 'interactive',
+                  content_type: dbContentType,
+                  rich_text: dbRichText,
                   duration_minutes: ch.duration_minutes || 15,
                   order_index: cIdx
                 }])
@@ -606,13 +609,15 @@ export default function CourseEditor({
         dataCache.invalidate();
       }
 
+      const { content_type: dbContentType, rich_text: dbRichText } = prepareChapterForDb(chapterData);
+
       if (chapterData.id) {
         const { error: updateError } = await supabase.from('chapters').update({
           module_id: chapterData.module_id,
           title: chapterData.title,
           description: chapterData.description || '',
-          content_type: chapterData.content_type || 'interactive',
-          rich_text: chapterData.rich_text || '',
+          content_type: dbContentType,
+          rich_text: dbRichText,
           duration_minutes: chapterData.duration_minutes || 15
         }).eq('id', chapterData.id);
 
@@ -627,8 +632,8 @@ export default function CourseEditor({
         module_id: chapterData.module_id,
         title: chapterData.title,
         description: chapterData.description || '',
-        content_type: chapterData.content_type || 'interactive',
-        rich_text: chapterData.rich_text || '',
+        content_type: dbContentType,
+        rich_text: dbRichText,
         duration_minutes: chapterData.duration_minutes || 15,
         order_index: chapters.length,
         is_preview: false
@@ -881,19 +886,19 @@ export default function CourseEditor({
         setModules([newMod]);
       }
 
-      const isHtml = editingChapter.content_type === 'html_app';
+      const { content_type: dbContentType, rich_text: dbRichText } = prepareChapterForDb(editingChapter);
       const lessonData = {
         module_id: targetModuleId,
         title: editingChapter.title,
         description: editingChapter.description,
-        content_type: isHtml ? 'interactive' : editingChapter.content_type,
+        content_type: dbContentType,
         video_url: editingChapter.video_url,
         pdf_url: editingChapter.pdf_url,
         button_link_text: editingChapter.button_link_text,
         button_link_url: editingChapter.button_link_url,
         button_link_color: editingChapter.button_link_color,
         cover_url: editingChapter.cover_url,
-        rich_text: isHtml ? formatHtmlAppContent(editingChapter.rich_text || '') : editingChapter.rich_text,
+        rich_text: dbRichText,
         duration_minutes: editingChapter.duration_minutes,
         order_index: editingChapter.id ? editingChapter.order_index : chapters.length
       };
@@ -949,20 +954,20 @@ export default function CourseEditor({
 
     try {
       setSaving(true);
-      const isHtml = editingExistingChapter.content_type === 'html_app';
+      const { content_type: dbContentType, rich_text: dbRichText } = prepareChapterForDb(editingExistingChapter);
       const { error } = await supabase
         .from('chapters')
         .update({
           title: editingExistingChapter.title,
           description: editingExistingChapter.description || '',
-          content_type: isHtml ? 'interactive' : editingExistingChapter.content_type,
+          content_type: dbContentType,
           video_url: editingExistingChapter.video_url || '',
           pdf_url: editingExistingChapter.pdf_url || '',
           button_link_text: editingExistingChapter.button_link_text || '',
           button_link_url: editingExistingChapter.button_link_url || '',
           button_link_color: editingExistingChapter.button_link_color || '#10b981',
           cover_url: editingExistingChapter.cover_url || '',
-          rich_text: isHtml ? formatHtmlAppContent(editingExistingChapter.rich_text || '') : (editingExistingChapter.rich_text || ''),
+          rich_text: dbRichText,
           duration_minutes: editingExistingChapter.duration_minutes || 0,
           module_id: editingExistingChapter.module_id || null,
           order_index: typeof editingExistingChapter.order_index === 'number' ? editingExistingChapter.order_index : 0
@@ -2193,15 +2198,15 @@ export default function CourseEditor({
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                           <div className="space-y-2">
                             <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Tipo da Aula</label>
-                            <div className="flex p-1 bg-black/60 rounded-xl border border-white/5 overflow-x-auto">
-                              {['video', 'pdf', 'link', 'checklist', 'interactive', 'html_app'].map((type) => (
+                            <div className="flex p-1 bg-black/60 rounded-xl border border-white/5 overflow-x-auto gap-1">
+                              {['video', 'audio', 'pdf', 'link', 'checklist', 'interactive', 'html_app'].map((type) => (
                                 <button 
                                   key={type}
                                   type="button"
                                   onClick={() => setEditingChapter({...editingChapter, content_type: type as any})}
-                                  className={`flex-1 py-3 px-2 rounded-lg text-[9px] sm:text-[10px] font-black transition-all uppercase whitespace-nowrap ${editingChapter.content_type === type ? 'bg-emerald-600 text-white shadow-lg' : 'text-gray-600 hover:text-gray-400'}`}
+                                  className={`flex-1 py-3 px-2 rounded-lg text-[9px] sm:text-[10px] font-black transition-all uppercase whitespace-nowrap flex items-center justify-center gap-1 ${editingChapter.content_type === type ? 'bg-emerald-600 text-white shadow-lg' : 'text-gray-600 hover:text-gray-400'}`}
                                 >
-                                  {type === 'link' ? 'BOTAO' : type === 'interactive' ? 'IA' : type === 'html_app' ? '🧩 MINI APP' : type}
+                                  {type === 'audio' ? <><Headphones size={12} /> ÁUDIO / PODCAST</> : type === 'link' ? 'BOTAO' : type === 'interactive' ? 'IA' : type === 'html_app' ? '🧩 MINI APP' : type}
                                 </button>
                               ))}
                             </div>
@@ -2235,15 +2240,20 @@ export default function CourseEditor({
                         ) : editingChapter.content_type !== 'link' ? (
                           <div className="space-y-2">
                             <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">
-                              {editingChapter.content_type === 'video' ? 'URL do Vídeo' : 'URL do PDF'}
+                              {editingChapter.content_type === 'video' ? 'URL do Vídeo' : editingChapter.content_type === 'audio' ? 'URL do Áudio / Podcast (mp3, m4a, ogg, wav)' : 'URL do PDF'}
                             </label>
                             <input 
                               type="text" 
-                              value={editingChapter.content_type === 'video' ? (editingChapter.video_url || '') : (editingChapter.pdf_url || '')}
-                              onChange={e => setEditingChapter({...editingChapter, [editingChapter.content_type === 'video' ? 'video_url' : 'pdf_url']: e.target.value})}
+                              value={editingChapter.content_type === 'video' || editingChapter.content_type === 'audio' ? (editingChapter.video_url || '') : (editingChapter.pdf_url || '')}
+                              onChange={e => setEditingChapter({...editingChapter, [editingChapter.content_type === 'video' || editingChapter.content_type === 'audio' ? 'video_url' : 'pdf_url']: e.target.value})}
                               className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-sm text-white focus:border-emerald-500 outline-none transition-all placeholder:text-gray-800"
-                              placeholder={editingChapter.content_type === 'video' ? "https://youtube.com/..." : "https://drive.google.com/..."}
+                              placeholder={editingChapter.content_type === 'video' ? "https://youtube.com/..." : editingChapter.content_type === 'audio' ? "https://.../audio.mp3 ou .m4a" : "https://drive.google.com/..."}
                             />
+                            {editingChapter.content_type === 'audio' && (
+                              <p className="text-[11px] text-zinc-500 italic ml-1">
+                                Suporta links diretos de áudio (.mp3, .m4a, .ogg, .wav), Google Drive ou URLs públicas de podcast.
+                              </p>
+                            )}
                           </div>
                         ) : (() => {
                           const [newChapterColor, newChapterStyle] = (editingChapter.button_link_color || '#10b981').split('|');
@@ -2577,6 +2587,8 @@ export default function CourseEditor({
                                     <div className="absolute inset-0 bg-black/20 flex items-center justify-center pointer-events-none">
                                       {ch.content_type === 'video' ? (
                                         <Video size={16} className="text-white drop-shadow-md" />
+                                      ) : ch.content_type === 'audio' ? (
+                                        <Headphones size={16} className="text-primary drop-shadow-md" />
                                       ) : ch.content_type === 'checklist' ? (
                                         <CheckSquare size={16} className="text-emerald-400 drop-shadow-md" />
                                       ) : ch.content_type === 'html_app' || isHtmlAppChapter(ch) ? (
@@ -2596,7 +2608,7 @@ export default function CourseEditor({
                                     </h4>
                                     <div className="flex items-center gap-4 mt-1">
                                       <span className="text-[9px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-1">
-                                        {ch.content_type === 'video' ? <Video size={10} /> : ch.content_type === 'html_app' || isHtmlAppChapter(ch) ? <Puzzle size={10} className="text-purple-400" /> : <FileText size={10} />} {ch.content_type === 'html_app' || isHtmlAppChapter(ch) ? 'MINI APP' : ch.content_type.toUpperCase()}
+                                        {ch.content_type === 'video' ? <Video size={10} /> : ch.content_type === 'audio' ? <Headphones size={10} className="text-primary" /> : ch.content_type === 'html_app' || isHtmlAppChapter(ch) ? <Puzzle size={10} className="text-purple-400" /> : <FileText size={10} />} {ch.content_type === 'audio' ? 'ÁUDIO / PODCAST' : ch.content_type === 'html_app' || isHtmlAppChapter(ch) ? 'MINI APP' : ch.content_type.toUpperCase()}
                                       </span>
                                       <span className="text-[9px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-1">
                                         <Clock size={10} /> {ch.duration_minutes || 0} MIN
@@ -2829,14 +2841,14 @@ export default function CourseEditor({
                                               <div className="space-y-2">
                                                 <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">Tipo de Conteúdo</label>
                                                 <div className="flex p-1 bg-black/60 rounded-xl border border-white/5 overflow-x-auto">
-                                                  {['video', 'pdf', 'link', 'checklist', 'interactive', 'html_app'].map((type) => (
+                                                  {['video', 'audio', 'pdf', 'link', 'checklist', 'interactive', 'html_app'].map((type) => (
                                                     <button 
                                                       key={type}
                                                       type="button"
                                                       onClick={() => setEditingExistingChapter(prev => prev ? ({ ...prev, content_type: type as any }) : ({ ...ch, content_type: type as any }))}
                                                       className={`flex-1 py-2 px-2 text-[8px] font-black rounded-lg transition-all uppercase whitespace-nowrap ${draft.content_type === type ? 'bg-blue-600 text-white' : 'text-gray-600 hover:text-gray-400'}`}
                                                     >
-                                                      {type === 'link' ? 'BOTAO' : type === 'interactive' ? 'IA' : type === 'html_app' ? '🧩 MINI APP' : type}
+                                                      {type === 'audio' ? <><Headphones size={11} /> ÁUDIO / PODCAST</> : type === 'link' ? 'BOTAO' : type === 'interactive' ? 'IA' : type === 'html_app' ? '🧩 MINI APP' : type}
                                                     </button>
                                                   ))}
                                                 </div>
@@ -2865,18 +2877,24 @@ export default function CourseEditor({
                                             ) : draft.content_type !== 'link' ? (
                                               <div className="space-y-2">
                                                 <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest ml-1">
-                                                  {draft.content_type === 'video' ? 'URL do Vídeo' : 'URL do PDF'}
+                                                  {draft.content_type === 'video' ? 'URL do Vídeo' : draft.content_type === 'audio' ? 'URL do Áudio / Podcast (mp3, m4a, ogg, wav)' : 'URL do PDF'}
                                                 </label>
                                                 <input 
                                                   type="text" 
-                                                  value={draft.content_type === 'video' ? (draft.video_url || '') : (draft.pdf_url || '')}
+                                                  value={draft.content_type === 'video' || draft.content_type === 'audio' ? (draft.video_url || '') : (draft.pdf_url || '')}
                                                   onChange={e => setEditingExistingChapter(prev => {
                                                     if (!prev) return null;
-                                                    const field = prev.content_type === 'video' ? 'video_url' : 'pdf_url';
+                                                    const field = (prev.content_type === 'video' || prev.content_type === 'audio') ? 'video_url' : 'pdf_url';
                                                     return { ...prev, [field]: e.target.value };
                                                   })}
                                                   className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-xs text-gray-400 font-mono focus:border-blue-500 outline-none transition-all"
+                                                  placeholder={draft.content_type === 'video' ? "https://youtube.com/..." : draft.content_type === 'audio' ? "https://.../podcast.mp3 ou .m4a" : "https://drive.google.com/..."}
                                                 />
+                                                {draft.content_type === 'audio' && (
+                                                  <p className="text-[11px] text-zinc-500 italic ml-1">
+                                                    Suporta arquivos de áudio (.mp3, .m4a, etc.), Google Drive ou URLs diretas de podcast.
+                                                  </p>
+                                                )}
                                               </div>
                                             ) : (() => {
                                               const [draftColor, draftStyle] = (draft.button_link_color || '#10b981').split('|');

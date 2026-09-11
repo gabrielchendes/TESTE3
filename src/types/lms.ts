@@ -75,7 +75,7 @@ export interface Chapter {
   course_id?: string;
   title: string;
   description: string;
-  content_type: 'video' | 'pdf' | 'text' | 'link' | 'checklist' | 'interactive' | 'html_app';
+  content_type: 'video' | 'audio' | 'pdf' | 'text' | 'link' | 'checklist' | 'interactive' | 'html_app';
   video_url?: string;
   pdf_url?: string;
   cover_url?: string;

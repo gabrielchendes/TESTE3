@@ -20,6 +20,7 @@ export default defineConfig(({mode}) => {
           cleanupOutdatedCaches: true,
           clientsClaim: true,
           skipWaiting: true,
+          importScripts: ['/firebase-messaging-sw.js'],
           globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
           globIgnores: [
             '**/AdminPanel*.js',
@@ -86,12 +87,12 @@ export default defineConfig(({mode}) => {
           start_url: '/',
           icons: [
             {
-              src: 'https://picsum.photos/seed/maternity/192/192',
+              src: '/icon-192.png',
               sizes: '192x192',
               type: 'image/png'
             },
             {
-              src: 'https://picsum.photos/seed/maternity/512/512',
+              src: '/icon-512.png',
               sizes: '512x512',
               type: 'image/png'
             }
@@ -144,6 +145,8 @@ export default defineConfig(({mode}) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
+        'react': path.resolve(__dirname, './node_modules/react'),
+        'react-dom': path.resolve(__dirname, './node_modules/react-dom'),
       },
       dedupe: ['react', 'react-dom'],
     },

@@ -347,15 +347,25 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
 
       for (let i = 0; i < registrationTokens.length; i += BATCH_SIZE) {
         const batchTokens: string[] = registrationTokens.slice(i, i + BATCH_SIZE);
+        
+        // FCM Admin SDK requires all data values to be strings
+        const sanitizedData: Record<string, string> = {
+          title: String(title || ''),
+          body: String(body || ''),
+          url: String(targetUrl || '/'),
+          tag: String(notificationTag || '')
+        };
+        if (customData && typeof customData === 'object') {
+          for (const [k, v] of Object.entries(customData)) {
+            if (v !== undefined && v !== null) {
+              sanitizedData[k] = typeof v === 'string' ? v : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+            }
+          }
+        }
+
         const message: any = {
           notification: { title, body },
-          data: {
-            title,
-            body,
-            url: targetUrl,
-            tag: notificationTag,
-            ...(customData || {})
-          },
+          data: sanitizedData,
           webpush: {
             fcmOptions: {
               link: targetUrl
@@ -383,7 +393,8 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
               const errCode = resp.error?.code;
               if (
                 errCode === 'messaging/invalid-registration-token' ||
-                errCode === 'messaging/registration-token-not-registered'
+                errCode === 'messaging/registration-token-not-registered' ||
+                errCode === 'messaging/mismatched-credential'
               ) {
                 failedTokens.push(batchTokens[idx]);
               }

@@ -44,6 +44,7 @@ import { supabase } from '../lib/supabase';
 import { dataCache } from '../lib/cache';
 import { showToast } from '../lib/customToast';
 import { BlockLessonViewer } from './BlockLessonViewer';
+import { prepareChapterForDb } from '../utils/htmlAppHelper';
 
 interface AiCourseFactoryModalProps {
   isOpen: boolean;
@@ -371,13 +372,18 @@ export const AiCourseFactoryModal: React.FC<AiCourseFactoryModalProps> = ({
             ? (typeof chap.rich_text === 'string' ? chap.rich_text : JSON.stringify(chap.rich_text))
             : (chap.interactive_content ? JSON.stringify(chap.interactive_content) : '');
 
+          const { content_type: dbContentType, rich_text: dbRichText } = prepareChapterForDb({
+            ...chap,
+            rich_text: richTextString
+          });
+
           await supabase.from('chapters').insert([
             {
               module_id: moduleId,
               title: chap.title,
               description: chap.description || '',
-              content_type: chap.content_type || 'interactive',
-              rich_text: richTextString,
+              content_type: dbContentType,
+              rich_text: dbRichText,
               cover_url: chap.cover_url || '',
               duration_minutes: chap.duration_minutes || 15,
               order_index: cIdx,

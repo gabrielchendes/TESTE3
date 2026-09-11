@@ -20,7 +20,8 @@ import {
   AlertCircle,
   ExternalLink,
   CheckSquare,
-  Puzzle
+  Puzzle,
+  Headphones
 } from 'lucide-react';
 import WhatsAppIcon from './WhatsAppIcon';
 import { motion, AnimatePresence } from 'motion/react';
@@ -42,6 +43,7 @@ const ChapterQuestions = lazyWithRetry(() => import('./ChapterQuestions'));
 const InteractiveChecklist = lazyWithRetry(() => import('./InteractiveChecklist').then(m => ({ default: m.InteractiveChecklist })));
 const BlockLessonViewer = lazyWithRetry(() => import('./BlockLessonViewer').then(m => ({ default: m.BlockLessonViewer })));
 const HtmlAppViewer = lazyWithRetry(() => import('./HtmlAppViewer'));
+const AudioLessonPlayer = lazyWithRetry(() => import('./AudioLessonPlayer'));
 
 interface CourseViewerProps {
   courseId: string;
@@ -749,6 +751,8 @@ export default function CourseViewer({ courseId, userId, onClose, initialCourse,
                                 <div className="w-full h-full bg-zinc-900 flex items-center justify-center text-white/30 group-hover:text-primary transition-colors">
                                   {isChapterHtmlApp ? (
                                     <Puzzle className="w-10 h-10 sm:w-12 sm:h-12 text-purple-400/80" />
+                                  ) : chapter.content_type === 'audio' ? (
+                                    <Headphones className="w-10 h-10 sm:w-12 sm:h-12 text-primary/80" />
                                   ) : (
                                     <PlayCircle className="w-10 h-10 sm:w-12 sm:h-12" />
                                   )}
@@ -770,6 +774,8 @@ export default function CourseViewer({ courseId, userId, onClose, initialCourse,
                                     <CheckCircle2 className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
                                   ) : isChapterHtmlApp ? (
                                     <Puzzle className="w-5 h-5 sm:w-6 sm:h-6 text-white drop-shadow-md" />
+                                  ) : chapter.content_type === 'audio' ? (
+                                    <Headphones className="w-5 h-5 sm:w-6 sm:h-6 text-white drop-shadow-md" />
                                   ) : (
                                     <Play className="w-5 h-5 sm:w-6 sm:h-6 text-white fill-white ml-0.5 sm:ml-1 drop-shadow-md" />
                                   )}
@@ -791,7 +797,7 @@ export default function CourseViewer({ courseId, userId, onClose, initialCourse,
                             <div className="space-y-0.5 px-2">
                               <div className="flex items-center gap-2">
                                 <span className="text-[10px] font-black text-primary uppercase tracking-[0.2em] italic leading-none">
-                                  {chapter.content_type === 'video' ? '' : chapter.content_type === 'pdf' ? '' : isChapterHtmlApp ? 'Mini App' : (t('course.reading') || 'Leitura')}
+                                  {chapter.content_type === 'video' ? '' : chapter.content_type === 'audio' ? 'Podcast' : chapter.content_type === 'pdf' ? '' : isChapterHtmlApp ? 'Mini App' : (t('course.reading') || 'Leitura')}
                                 </span>
                                 {isCompleted && <div className="w-1 h-1 rounded-full bg-green-500" />}
                               </div>
@@ -953,6 +959,33 @@ export default function CourseViewer({ courseId, userId, onClose, initialCourse,
                             if (!currentProgress?.completed) {
                               toggleCompletion(activeChapter.id);
                             }
+                          }
+                        }}
+                      />
+                    </Suspense>
+                  </motion.div>
+                ) : activeChapter?.content_type === 'audio' ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.2 }}
+                    className="w-full py-4 sm:py-6"
+                  >
+                    <Suspense fallback={
+                      <div className="w-full h-64 rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center">
+                        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                      </div>
+                    }>
+                      <AudioLessonPlayer
+                        url={activeChapter.video_url || ""}
+                        title={activeChapter.title}
+                        description={activeChapter.description}
+                        coverUrl={activeChapter.cover_url}
+                        durationMinutes={activeChapter.duration_minutes}
+                        isCompleted={isCurrentChapterCompleted}
+                        onEnded={() => {
+                          if (activeChapter && !isCurrentChapterCompleted) {
+                            toggleCompletion(activeChapter.id);
                           }
                         }}
                       />

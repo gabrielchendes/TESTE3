@@ -239,10 +239,17 @@ export default function Dashboard({ user }: DashboardProps) {
     }
 
     // Check if push prompt should be shown, strictly without auto-downloading Firebase
-    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
-      const dismissed = localStorage.getItem(`push_modal_dismissed_${user.id}`);
-      if (!dismissed) {
-        setShowWelcomeModal(true);
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'default') {
+        const dismissed = localStorage.getItem(`push_modal_dismissed_${user.id}`);
+        if (!dismissed) {
+          setShowWelcomeModal(true);
+        }
+      } else if (Notification.permission === 'granted') {
+        // Returning user with permission already granted: sync token & foreground listener lazily in idle time
+        import('../lib/pushNotifications').then(({ initPushIfGranted }) => {
+          initPushIfGranted(user.id);
+        }).catch(() => {});
       }
     }
   }, [user.id, settings.banner_images]);
@@ -430,7 +437,7 @@ export default function Dashboard({ user }: DashboardProps) {
             if (!chapterMap[courseId]) chapterMap[courseId] = [];
             
             chapterMap[courseId].push(ch.id);
-            if (ch.content_type === 'video') stats[courseId].lessons++;
+            if (ch.content_type === 'video' || ch.content_type === 'audio') stats[courseId].lessons++;
             else stats[courseId].materials++;
           }
         });
