@@ -55,11 +55,11 @@ try {
       // If the message already includes a notification payload, Firebase SDK automatically handles display.
       // We only display a manual notification if this is a data-only payload to avoid duplicate popups.
       if (!payload.notification && payload.data) {
-        const notificationTitle = payload.data.title || 'Nova Notificação';
+        const notificationTitle = payload.data.title || 'New Notification';
         const tag = payload.data.broadcast_id || payload.data.id || payload.data.tag || 'maternidade-push';
         
         const notificationOptions = {
-          body: payload.data.body || 'Você tem uma nova mensagem.',
+          body: payload.data.body || 'You have a new message.',
           icon: payload.data.icon || '/icon-192.png',
           badge: payload.data.badge || '/icon-192.png',
           tag: tag,

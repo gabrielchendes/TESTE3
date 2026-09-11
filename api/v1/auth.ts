@@ -240,7 +240,7 @@ async function handleLoginVerify(req: VercelRequest, res: VercelResponse) {
           }
         }
       } else {
-        return res.status(404).json({ error: 'Usuário não encontrado. Verifique se o e-mail digitado está cadastrado no sistema.' });
+        return res.status(404).json({ error: 'User not found. Check if the entered email is registered in the system.' });
       }
     }
   }

@@ -211,7 +211,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const adminActions = ['notification-history', 'notification-clear', 'notification-details', 'push-status'];
   if (adminActions.includes(action)) {
     const isAdmin = await checkAdmin(req);
-    if (!isAdmin) return res.status(403).json({ error: 'Acesso negado: Apenas administradores' });
+    if (!isAdmin) return res.status(403).json({ error: 'Access denied: Administrators only.' });
   }
 
   // Specialized check for notification-push: 
@@ -220,7 +220,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const userIds = req.body?.userIds;
     if (userIds && Array.isArray(userIds) && userIds.length > 1) {
       const isAdmin = await checkAdmin(req);
-      if (!isAdmin) return res.status(403).json({ error: 'Acesso negado: Broadcasts exigem privilégios de administrador' });
+      if (!isAdmin) return res.status(403).json({ error: 'Access denied: Broadcasts require administrator privileges.' });
     }
   }
 
@@ -269,7 +269,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       stack: (error as any).stack
     });
     return res.status(500).json({ 
-      error: (error as any).message || 'Erro interno no servidor de notificações',
+      error: (error as any).message || 'Internal error on the notification server',
       details: (error as any).details || null
     });
   }
@@ -277,7 +277,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 async function sendPushNotification(userIds: string[], title: string, body: string, customData?: Record<string, any>, client: any = supabaseAdmin) {
   if (!userIds || !userIds.length) {
-    return { success: false, reason: 'Nenhum ID de usuário fornecido', count: 0, tokensFound: 0 };
+    return { success: false, reason: 'No user ID provided', count: 0, tokensFound: 0 };
   }
 
   try {
@@ -312,7 +312,7 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
 
     if (tokenError) {
       console.error('[Notifications API] Supabase error fetching tokens:', tokenError);
-      return { success: false, reason: 'Erro ao consultar tokens no Supabase: ' + tokenError.message, count: 0, usersCount: 0, tokensFound: 0 };
+      return { success: false, reason: 'Error querying tokens in Supabase: ' + tokenError.message, count: 0, usersCount: 0, tokensFound: 0 };
     }
     
     if (!tokens || tokens.length === 0) {
@@ -451,14 +451,14 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
         }
       } catch (fcmErr: any) {
         console.error('[Notifications API] FCM Server Key request error:', fcmErr);
-        return { success: false, reason: 'Erro na chamada ao FCM: ' + fcmErr.message, count: 0, tokensFound: registrationTokens.length };
+        return { success: false, reason: 'Error calling FCM: ' + fcmErr.message, count: 0, tokensFound: registrationTokens.length };
       }
     } 
     // Neither Transport Configured
     else {
       return { 
         success: false, 
-        reason: 'Credencial Firebase não configurada no servidor (adicione FIREBASE_SERVICE_ACCOUNT ou FIREBASE_SERVER_KEY nas variáveis de ambiente).',
+        reason: 'Firebase credential not configured on the server (add FIREBASE_SERVICE_ACCOUNT or FIREBASE_SERVER_KEY to the environment variables).',
         tokensFound: registrationTokens.length,
         count: 0
       };
@@ -491,7 +491,7 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
 
 async function handleTestPush(req: VercelRequest, res: VercelResponse) {
   const client = getClientForReq(req);
-  const { title = 'Teste de Notificação Push 🚀', body = 'Seu dispositivo está configurado e recebendo notificações com sucesso!' } = req.body;
+  const { title = 'Push Notification Test 🚀', body = 'Your device is set up and successfully receiving notifications!' } = req.body;
   
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ error: 'Não autenticado' });
@@ -598,7 +598,7 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
         const richRows = chunk.map(uid => ({
           user_id: uid,
           broadcast_id: broadcastId,
-          title: title || 'Notificação',
+          title: title || 'Notification',
           body: body || '',
           is_read: false,
           created_at: nowIso
@@ -612,7 +612,7 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
           // Fallback to strict standard schema
           const standardRows = chunk.map(uid => ({
             user_id: uid,
-            title: title || 'Notificação',
+            title: title || 'Notification',
             body: body || '',
             is_read: false,
             created_at: nowIso
@@ -626,7 +626,7 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
             console.warn('[Notifications API] Retry with minimal payload:', stdErr.message);
             const minimalRows = chunk.map(uid => ({
               user_id: uid,
-              title: title || 'Notificação',
+              title: title || 'Notification',
               body: body || ''
             }));
             await client.from('notifications').insert(minimalRows);
@@ -646,12 +646,12 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
       broadcastId,
       url: data?.url || '/'
     };
-    pushResult = await sendPushNotification(targetUserIds, title || 'Notificação', body || '', customData, client);
+    pushResult = await sendPushNotification(targetUserIds, title || 'Notification', body || '', customData, client);
   }
 
   const historyItem = {
     id: broadcastId,
-    title: title || 'Notificação',
+    title: title || 'Notification',
     body: body || '',
     target_count: targetUserIds.length,
     read_count: 0,
@@ -760,8 +760,8 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
 
   if (adminIds.length > 20) adminIds = adminIds.slice(0, 20);
 
-  const finalTitle = title || 'Nova Atividade no App';
-  const finalBody = body || 'Há uma nova movimentação que requer sua atenção.';
+  const finalTitle = title || 'New Activity in the App';
+  const finalBody = body || 'There is a new development that requires your attention.';
   const nowIso = new Date().toISOString();
   const broadcastId = randomUUID();
 
@@ -897,7 +897,7 @@ async function handleHistory(req: VercelRequest, res: VercelResponse) {
 
     allNotifications.forEach((n: any) => {
       const isRead = Boolean(n.is_read || n.read || n.read_at);
-      const notifTitle = n.title || 'Notificação';
+      const notifTitle = n.title || 'Notification';
       const notifBody = n.body || n.message || '';
       const notifDate = n.created_at || new Date().toISOString();
 

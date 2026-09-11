@@ -225,7 +225,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const apiKey = getGeminiApiKey();
     if (!apiKey) {
       return res.status(503).json({
-        error: 'Chave da API Gemini não configurada no servidor Vercel. Por favor adicione a variável GEMINI_API_KEY no painel de configurações de ambiente da Vercel.',
+        error: 'Gemini API key not configured on the Vercel server. Please add the GEMINI_API_KEY variable in the Vercel environment settings panel.',
         missingKey: true
       });
     }
@@ -314,7 +314,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (currentSentCount >= maxMessages) {
             return res.status(403).json({
               error: 'VIP_REQUIRED',
-              message: customTexts['ai_expert.limit_reached_toast'] || 'Você atingiu o limite de mensagens deste período. Atualize para o plano VIP Ilimitado para conversar sem limites!',
+              message: customTexts['ai_expert.limit_reached_toast'] || 'You have reached the message limit for this period. Upgrade to the Unlimited VIP plan to chat without limits!',
               isLimitReached: true,
               isUserUnlimited: false
             });
@@ -364,7 +364,7 @@ ${userContext?.userName ? `User's Name: ${userContext.userName}` : ''}`;
     });
 
     const responseText = result.text;
-    const rawReply = responseText || 'Desculpe, não consegui processar uma resposta no momento. Por favor tente novamente em instantes.';
+    const rawReply = responseText || 'Sorry, I could not process a response at the moment. Please try again in a few moments.';
     const reply = rawReply.replace(/\*\*/g, '');
 
     return res.status(200).json({
@@ -378,7 +378,7 @@ ${userContext?.userName ? `User's Name: ${userContext.userName}` : ''}`;
 
     if (errMsg.includes('GEMINI_API_KEY environment variable is missing')) {
       return res.status(503).json({
-        error: 'Chave da API Gemini não configurada no servidor Vercel (GEMINI_API_KEY).',
+        error: 'GEMINI_API_KEY environment variable is missing'',
         missingKey: true
       });
     }
@@ -392,13 +392,13 @@ ${userContext?.userName ? `User's Name: ${userContext.userName}` : ''}`;
 
     if (isQuotaError) {
       return res.status(429).json({
-        error: 'O limite temporário de requisições à IA foi atingido. Por favor, aguarde cerca de 1 minuto e tente novamente.'
+        error: 'The temporary limit for AI requests has been reached. Please wait a moment and try again later.'
       });
     }
 
     if (errMsg.includes('503') || errMsg.includes('UNAVAILABLE') || errMsg.includes('high demand')) {
       return res.status(503).json({
-        error: 'Os servidores da IA estão com alta demanda temporária. Por favor, aguarde alguns segundos e tente novamente.'
+        error: 'We are experiencing temporarily high demand. Please wait a few seconds and try again later.'
       });
     }
 
@@ -416,7 +416,7 @@ ${userContext?.userName ? `User's Name: ${userContext.userName}` : ''}`;
     } catch (_) {}
 
     return res.status(500).json({
-      error: 'Erro de comunicação com a IA Expert: ' + (cleanError || 'Erro desconhecido')
+      error: 'Communication error: ' + (cleanError || 'Unknown error')
     });
   }
 }

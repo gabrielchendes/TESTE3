@@ -122,7 +122,7 @@ export default function AudioLessonPlayer({
         return;
       }
       setIsLoading(false);
-      setLoadError('Não foi possível carregar o arquivo de áudio. Verifique se o link é público e válido.');
+      setLoadError('Unable to load the audio file.');
     };
 
     const handleCanPlay = () => {
@@ -359,8 +359,8 @@ export default function AudioLessonPlayer({
           <div className="relative z-10 mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-3 text-amber-300 text-xs">
             <FileAudio size={16} className="shrink-0 mt-0.5" />
             <div className="flex-1">
-              <p className="font-bold">Áudio não anexado</p>
-              <p className="text-amber-300/80">Esta aula ainda não possui a URL do arquivo de áudio cadastrada. Edite a aula no painel para inserir o link (.mp3, .m4a, Google Drive).</p>
+              <p className="font-bold">Audio not attached</p>
+              <p className="text-amber-300/80">This lesson does not yet have an audio file URL registered. Edit the lesson in the dashboard to add the link (.mp3, .m4a, Google Drive).</p>
             </div>
           </div>
         )}
@@ -370,7 +370,7 @@ export default function AudioLessonPlayer({
           <div className="relative z-10 mb-6 p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-start gap-3 text-rose-300 text-xs">
             <AlertCircle size={16} className="shrink-0 mt-0.5" />
             <div className="flex-1">
-              <p className="font-bold">Aviso de Reprodução:</p>
+              <p className="font-bold">Playback error notice:</p>
               <p className="text-rose-400/90">{loadError}</p>
             </div>
           </div>
@@ -414,7 +414,7 @@ export default function AudioLessonPlayer({
               onClick={handleSpeedCycle}
               disabled={!effectiveUrl}
               className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-black tracking-wider text-zinc-300 hover:text-white transition-all cursor-pointer active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Velocidade de Reprodução"
+              title="Playback Speed"
             >
               {playbackRate}x
             </button>
@@ -428,7 +428,7 @@ export default function AudioLessonPlayer({
               onClick={() => seekRelative(-15)}
               disabled={!effectiveUrl}
               className="p-2.5 text-zinc-400 hover:text-white hover:bg-white/5 rounded-full transition-all cursor-pointer active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Voltar 15 segundos"
+              title="15s back"
             >
               <RotateCcw size={22} />
             </button>
@@ -439,7 +439,7 @@ export default function AudioLessonPlayer({
               onClick={togglePlay}
               disabled={!effectiveUrl || isLoading}
               className="w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-primary hover:brightness-110 text-white flex items-center justify-center shadow-[0_10px_35px_rgba(var(--primary-rgb),0.5)] transition-all cursor-pointer active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
-              title={isPlaying ? 'Pausar' : 'Reproduzir'}
+              title={isPlaying ? 'Pause' : 'Play'}
             >
               {isPlaying ? (
                 <Pause size={28} className="fill-white" />
@@ -454,7 +454,7 @@ export default function AudioLessonPlayer({
               onClick={() => seekRelative(15)}
               disabled={!effectiveUrl}
               className="p-2.5 text-zinc-400 hover:text-white hover:bg-white/5 rounded-full transition-all cursor-pointer active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed"
-              title="Avançar 15 segundos"
+              title="15s forward"
             >
               <RotateCw size={22} />
             </button>
@@ -466,7 +466,7 @@ export default function AudioLessonPlayer({
               type="button"
               onClick={toggleMute}
               className="p-1.5 text-zinc-400 hover:text-white rounded-lg transition-colors cursor-pointer"
-              title={isMuted ? 'Ativar som' : 'Silenciar'}
+              title={isMuted ? 'Turn on sound' : 'Mute'}
             >
               {isMuted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
             </button>

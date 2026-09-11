@@ -2206,7 +2206,7 @@ export default function CourseEditor({
                                   onClick={() => setEditingChapter({...editingChapter, content_type: type as any})}
                                   className={`flex-1 py-3 px-2 rounded-lg text-[9px] sm:text-[10px] font-black transition-all uppercase whitespace-nowrap flex items-center justify-center gap-1 ${editingChapter.content_type === type ? 'bg-emerald-600 text-white shadow-lg' : 'text-gray-600 hover:text-gray-400'}`}
                                 >
-                                  {type === 'audio' ? <><Headphones size={12} /> ÁUDIO / PODCAST</> : type === 'link' ? 'BOTAO' : type === 'interactive' ? 'IA' : type === 'html_app' ? '🧩 MINI APP' : type}
+                                  {type === 'audio' ? <><Headphones size={12} /> ÁUDIO </> : type === 'link' ? 'BOTAO' : type === 'interactive' ? 'IA' : type === 'html_app' ? '🧩 MINI APP' : type}
                                 </button>
                               ))}
                             </div>
@@ -2608,7 +2608,7 @@ export default function CourseEditor({
                                     </h4>
                                     <div className="flex items-center gap-4 mt-1">
                                       <span className="text-[9px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-1">
-                                        {ch.content_type === 'video' ? <Video size={10} /> : ch.content_type === 'audio' ? <Headphones size={10} className="text-primary" /> : ch.content_type === 'html_app' || isHtmlAppChapter(ch) ? <Puzzle size={10} className="text-purple-400" /> : <FileText size={10} />} {ch.content_type === 'audio' ? 'ÁUDIO / PODCAST' : ch.content_type === 'html_app' || isHtmlAppChapter(ch) ? 'MINI APP' : ch.content_type.toUpperCase()}
+                                        {ch.content_type === 'video' ? <Video size={10} /> : ch.content_type === 'audio' ? <Headphones size={10} className="text-primary" /> : ch.content_type === 'html_app' || isHtmlAppChapter(ch) ? <Puzzle size={10} className="text-purple-400" /> : <FileText size={10} />} {ch.content_type === 'audio' ? 'ÁUDIO' : ch.content_type === 'html_app' || isHtmlAppChapter(ch) ? 'MINI APP' : ch.content_type.toUpperCase()}
                                       </span>
                                       <span className="text-[9px] font-black text-gray-500 uppercase tracking-widest flex items-center gap-1">
                                         <Clock size={10} /> {ch.duration_minutes || 0} MIN
@@ -2848,7 +2848,7 @@ export default function CourseEditor({
                                                       onClick={() => setEditingExistingChapter(prev => prev ? ({ ...prev, content_type: type as any }) : ({ ...ch, content_type: type as any }))}
                                                       className={`flex-1 py-2 px-2 text-[8px] font-black rounded-lg transition-all uppercase whitespace-nowrap ${draft.content_type === type ? 'bg-blue-600 text-white' : 'text-gray-600 hover:text-gray-400'}`}
                                                     >
-                                                      {type === 'audio' ? <><Headphones size={11} /> ÁUDIO / PODCAST</> : type === 'link' ? 'BOTAO' : type === 'interactive' ? 'IA' : type === 'html_app' ? '🧩 MINI APP' : type}
+                                                      {type === 'audio' ? <><Headphones size={11} /> ÁUDIO </> : type === 'link' ? 'BOTAO' : type === 'interactive' ? 'IA' : type === 'html_app' ? '🧩 MINI APP' : type}
                                                     </button>
                                                   ))}
                                                 </div>

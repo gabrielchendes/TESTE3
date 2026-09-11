@@ -555,7 +555,7 @@ export default function Dashboard({ user }: DashboardProps) {
       return;
     }
 
-    toast.error(t('course.purchase_unavailable') || 'Este curso ainda não possui um link de compra configurado.');
+    toast.error(t('course.purchase_unavailable') || 'This course does not yet have a purchase link.');
   }, [selectedCourse]);
 
   const getCourseProgress = useCallback((courseId: string) => {
@@ -717,13 +717,13 @@ export default function Dashboard({ user }: DashboardProps) {
       localStorage.setItem(storageKey, JSON.stringify(celebratedMilestones));
       
       const messages = {
-        25: settings.custom_texts?.['celebration.25'] || t('celebration.25') || "🔥 Parabéns! Você já conquistou 25% do conteúdo! Continue assim!",
-        50: settings.custom_texts?.['celebration.50'] || t('celebration.50') || "⭐ Sensacional! Metade do caminho já foi! O topo está próximo!",
-        75: settings.custom_texts?.['celebration.75'] || t('celebration.75') || "🚀 Impressionante! 75% concluído. Você é pura determinação!",
-        100: settings.custom_texts?.['celebration.100'] || t('celebration.100') || "🏆 LENDÁRIO! 100% CONCLUÍDO! Você dominou todo o conteúdo! Parabéns!"
+        25: settings.custom_texts?.['celebration.25'] || t('celebration.25') || "🔥 Congratulations! You've already completed 25% of the content! Keep it up!",
+        50: settings.custom_texts?.['celebration.50'] || t('celebration.50') || "⭐ Sensational! You're halfway there! The top is within reach!",
+        75: settings.custom_texts?.['celebration.75'] || t('celebration.75') || "🚀 Impressive! 75% complete. You're pure determination!",
+        100: settings.custom_texts?.['celebration.100'] || t('celebration.100') || "🏆 LEGENDARY! 100% COMPLETE! You've mastered all the content! Congratulations!"
       };
 
-      toast.success(messages[currentMilestone as keyof typeof messages] || `Incrível! Você alcançou ${currentMilestone}% de progresso!`, {
+      toast.success(messages[currentMilestone as keyof typeof messages] || `Amazing! You've reached ${currentMilestone}% progress!`, {
         duration: 5000,
         icon: currentMilestone === 100 ? '🏆' : '✨',
         position: 'top-center'
@@ -776,10 +776,10 @@ export default function Dashboard({ user }: DashboardProps) {
                   <Bell className="text-primary animate-pulse" size={36} />
                 </div>
                 <h3 className="text-2xl font-black text-white uppercase tracking-tighter italic mb-4">
-                  {settings.custom_texts?.['push.title'] || t('push.title') || 'Avisos Importantes!'}
+                  {settings.custom_texts?.['push.title'] || t('push.title') || 'Important Notices!'}
                 </h3>
                 <p className="text-gray-400 text-sm mb-10 leading-relaxed font-medium">
-                  {settings.custom_texts?.['push.description'] || t('push.description') || 'Deseja receber avisos de novas aulas, materiais e comunicados importantes diretamente no seu celular?'}
+                  {settings.custom_texts?.['push.description'] || t('push.description') || 'Would you like to receive notifications about new classes, materials, and important announcements directly on your mobile phone?'}
                 </p>
                 <div className="flex flex-col gap-4">
                   <button 
@@ -798,7 +798,7 @@ export default function Dashboard({ user }: DashboardProps) {
                     }}
                     className="w-full bg-primary hover:bg-primary-hover text-white font-black py-5 rounded-2xl shadow-2xl shadow-primary/30 active:scale-95 transition-all text-xs tracking-[0.2em] uppercase italic"
                   >
-                    {settings.custom_texts?.['push.allow'] || t('push.allow') || 'Ativar Notificações'}
+                    {settings.custom_texts?.['push.allow'] || t('push.allow') || 'Turn on notifications'}
                   </button>
                   <button 
                     onClick={() => {
@@ -868,7 +868,7 @@ export default function Dashboard({ user }: DashboardProps) {
                   {/* Content Sections */}
                   <div className="relative z-10 space-y-4 mt-2">
                     <Carousel 
-                      title={settings.custom_texts?.['dashboard.courses_paid'] || t('dashboard.courses_paid') || 'Sua Jornada Principal  🔥'}
+                      title={settings.custom_texts?.['dashboard.courses_paid'] || t('dashboard.courses_paid') || 'Your Main Journey 🔥'}
                     >
                       {mainCourses.length > 0 ? (
                         mainCourses.map(course => (
@@ -886,7 +886,7 @@ export default function Dashboard({ user }: DashboardProps) {
                         <div className="w-full h-48 flex flex-col items-center justify-center text-gray-600 border border-white/5 rounded-3xl bg-white/5">
                           <Book size={32} className="mb-4 opacity-20" />
                           <p className="font-bold text-xs uppercase tracking-widest text-center px-4">
-                            {settings.custom_texts?.['dashboard.empty_locked'] || t('dashboard.empty_locked') || 'Você ainda não possui cursos liberados.'}
+                            {settings.custom_texts?.['dashboard.empty_locked'] || t('dashboard.empty_locked') || 'You do not have any courses available yet.'}
                           </p>
                         </div>
                       )}
@@ -894,7 +894,7 @@ export default function Dashboard({ user }: DashboardProps) {
 
                     {bonusCourses.length > 0 && (
                       <Carousel 
-                        title={settings.custom_texts?.['dashboard.courses_bonus'] || t('dashboard.courses_bonus') || 'Prêmios & Bônus Exclusivos  🎁'}
+                        title={settings.custom_texts?.['dashboard.courses_bonus'] || t('dashboard.courses_bonus') || 'Exclusive Prizes and Bonuses 🎁'}
                       >
                         {bonusCourses.map(course => (
                           <ProductCard
@@ -1013,7 +1013,7 @@ export default function Dashboard({ user }: DashboardProps) {
                 if (previewCourse.checkout_url) {
                   window.location.href = previewCourse.checkout_url;
                 } else {
-                  toast.error(t('course.purchase_unavailable') || 'Este curso ainda não possui um link de compra configurado.');
+                  toast.error(t('course.purchase_unavailable') || 'This course does not yet have a purchase link.');
                 }
               }}
             />
