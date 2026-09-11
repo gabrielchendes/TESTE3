@@ -378,7 +378,7 @@ ${userContext?.userName ? `User's Name: ${userContext.userName}` : ''}`;
 
     if (errMsg.includes('GEMINI_API_KEY environment variable is missing')) {
       return res.status(503).json({
-        error: 'GEMINI_API_KEY environment variable is missing'',
+        error: 'GEMINI_API_KEY environment variable is missing',
         missingKey: true
       });
     }
