@@ -246,56 +246,36 @@ export default function App() {
     window.scrollTo(0, 0);
   }, [user]);
 
-  // Google Analytics GA4 dynamic initialization
+  // Google Tag Manager dynamic initialization
   useEffect(() => {
     // Avoid loading tracking scripts inside the sandboxed preview iframe to prevent security exceptions/Script errors
     const isIframe = typeof window !== 'undefined' && window.self !== window.top;
     if (isIframe) return;
 
-    const gaId = settings?.ga4_tag_id;
-    if (!gaId) return;
+    // Altere para a chave do GTM (ex: GTM-XXXXXXX)
+    const gtmId = settings?.gtm_id; 
+    if (!gtmId) return;
 
-    // Check if script already exists
-    if (document.querySelector(`script[src*="gtag/js?id=${gaId}"]`)) return;
+    // Check if GTM script already exists
+    if (document.querySelector(`script[src*="googletagmanager.com/gtm.js?id=${gtmId}"]`)) return;
 
+    // Prepara a dataLayer global
+    (window as any).dataLayer = (window as any).dataLayer || [];
+    (window as any).dataLayer.push({
+      'gtm.start': new Date().getTime(),
+      event: 'gtm.js'
+    });
+
+    // Injeta o script do GTM no head
     const script = document.createElement('script');
     script.async = true;
-    script.src = `https://www.googletagmanager.com/gtag/js?id=${gaId}`;
+    script.src = `https://www.googletagmanager.com/gtm.js?id=${gtmId}`;
     document.head.appendChild(script);
 
-    const initScript = document.createElement('script');
-    initScript.innerHTML = `
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-      gtag('config', '${gaId}', {
-        page_path: window.location.pathname + window.location.hash,
-      });
-    `;
-    document.head.appendChild(initScript);
-
     return () => {
-      // We don't necessarily want to remove GA once loaded to avoid re-init issues, 
-      // but clean up init script is fine.
-      if (initScript.parentNode) document.head.removeChild(initScript);
+      // Opcional: limpeza se o componente desmontar
     };
-  }, [settings?.ga4_tag_id]);
-
-  // Track hash changes (navigation)
-  useEffect(() => {
-    const handleHashChange = () => {
-      const gaId = settings?.ga4_tag_id;
-      if (gaId && (window as any).gtag) {
-        (window as any).gtag('config', gaId, {
-          page_path: window.location.pathname + window.location.hash,
-          page_title: document.title
-        });
-      }
-    };
-
-    window.addEventListener('hashchange', handleHashChange);
-    return () => window.removeEventListener('hashchange', handleHashChange);
-  }, [settings?.ga4_tag_id]);
+  }, [settings?.gtm_id]);
 
   if (settingsLoading || authLoading) {
     return <LoadingScreen />;

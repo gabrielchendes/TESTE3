@@ -49,7 +49,7 @@ export interface AppSettings {
   banner_sync?: boolean;
   course_pdf_auto_complete_fullscreen?: boolean;
   app_url?: string;
-  ga4_tag_id?: string;
+  gtm_id?: string;
   main_course_hotmart_id?: string;
   show_course_titles_home?: boolean;
 }

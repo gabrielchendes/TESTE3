@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS public.app_settings (
     logo_url TEXT,
     favicon_url TEXT,
     pwa_icon_url TEXT,
-    ga4_tag_id TEXT,
+    gtm_id TEXT,
     support_whatsapp TEXT DEFAULT '5500000000000',
     support_email TEXT DEFAULT 'suporte@seudominio.com',
     support_whatsapp_message TEXT DEFAULT 'Olá, gostaria de tirar uma dúvida sobre o curso.',

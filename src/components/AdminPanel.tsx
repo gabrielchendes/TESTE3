@@ -1124,7 +1124,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
             admin_email: localSettings?.admin_email,
             auth_method: localSettings?.auth_method,
             app_url: localSettings?.app_url,
-            ga4_tag_id: localSettings?.ga4_tag_id
+            gtm_id: localSettings?.gtm_id
           },
           adminPassword: adminPassword || undefined
         })
@@ -4410,14 +4410,14 @@ export default function AdminPanel({ user }: AdminPanelProps) {
                             <h5 className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Rastreamento e Analytics</h5>
                             <div className="space-y-4">
                               <div className="space-y-2">
-                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest opacity-70">Google Analytics GA4 ID</label>
+                                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest opacity-70">Google Tag Manager</label>
                                 <div className="relative group">
                                   <input 
                                     type="text" 
-                                    value={localSettings?.ga4_tag_id || ''}
-                                    onChange={(e) => setLocalSettings({ ...localSettings, ga4_tag_id: e.target.value })}
+                                    value={localSettings?.gtm_id || ''}
+                                    onChange={(e) => setLocalSettings({ ...localSettings, gtm_id: e.target.value })}
                                     className="w-full bg-black border border-white/10 rounded-xl px-10 py-2.5 text-sm text-white focus:border-blue-500 outline-none transition-all font-mono"
-                                    placeholder="G-XXXXXXXXXX"
+                                    placeholder="GTM-XXXXXXX"
                                   />
                                   <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 group-focus-within:text-blue-500 transition-colors">
                                     <Globe size={14} />
@@ -4561,7 +4561,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
                                 background_color: localSettings.background_color,
                                 support_whatsapp: localSettings.support_whatsapp,
                                 support_email: localSettings.support_email,
-                                ga4_tag_id: localSettings.ga4_tag_id
+                                gtm_id: localSettings.gtm_id
                               });
                               setIsSavingSettings(false);
                             }}
