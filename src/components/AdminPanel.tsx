@@ -3027,7 +3027,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
 
                                           <span className="text-[10px] font-bold text-gray-500 flex items-center gap-1">
                                             <Calendar size={12} className="opacity-60" />
-                                            {new Date(item.created_at || item.sent_at).toLocaleString('pt-BR')}
+                                            {new Date(item.created_at || item.sent_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
                                           </span>
                                         </div>
                                         <h4 className="font-black text-white uppercase tracking-tight text-base">{item.title}</h4>
@@ -3135,7 +3135,7 @@ export default function AdminPanel({ user }: AdminPanelProps) {
                                     {selectedBroadcast.type === 'both' ? 'PUSH + INTERNA' : (selectedBroadcast.type === 'in_app' ? 'INTERNA' : 'PUSH')}
                                   </span>
                                   <span className="text-[10px] font-bold text-gray-500">
-                                    {new Date(selectedBroadcast.created_at || selectedBroadcast.sent_at).toLocaleString('pt-BR')}
+                                    {new Date(selectedBroadcast.created_at || selectedBroadcast.sent_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
                                   </span>
                                 </div>
                                 <h3 className="text-xl font-black text-white uppercase tracking-tighter">{selectedBroadcast.title}</h3>

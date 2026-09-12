@@ -168,7 +168,7 @@ export default function AiAssistantModal({ userId, userEmail, userName, userAvat
   const checkUserVipStatus = async (showToastOnCheck = false) => {
     if (!userId || !userId.trim()) {
       setIsUserUnlimited(false);
-      if (showToastOnCheck) toast.info('Nenhuma conta detectada. Garanta seu acesso VIP!');
+      if (showToastOnCheck) toast.info('No account detected. Unlock your VIP access!');
       return;
     }
     const cleanId = userId.trim();
@@ -234,9 +234,9 @@ export default function AiAssistantModal({ userId, userEmail, userName, userAvat
 
         if (showToastOnCheck) {
           if (isUnlimited) {
-            toast.success('Acesso VIP Ilimitado verificado com sucesso! 🎉 Você pode conversar sem limites.');
+            toast.success('VIP Unlimited access verified successfully! 🎉 Enjoy unlimited conversations.');
           } else {
-            toast.info('Nenhuma assinatura VIP ativa encontrada no momento.');
+            toast.info('No active VIP subscription found at this time.');
           }
         }
       } else {
@@ -392,9 +392,6 @@ export default function AiAssistantModal({ userId, userEmail, userName, userAvat
       return;
     }
 
-    const sentTs = recordSentTimestamp();
-    setSentTimestamps(getSentMessageTimestamps());
-
     const userMsg: Message = {
       id: Date.now().toString(),
       role: 'user',
@@ -437,17 +434,15 @@ export default function AiAssistantModal({ userId, userEmail, userName, userAvat
       } catch (parseErr) {
         console.error('Non-JSON response from AI chat:', responseText.substring(0, 200));
         let friendlyMsg = res.ok
-          ? 'Resposta inválida do servidor.'
-          : `Erro no servidor (${res.status}). Por favor, tente novamente.`;
+          ? 'Invalid response from server.'
+          : `Server error (${res.status}). Please try again.`;
         if (responseText.includes('FUNCTION_INVOCATION_FAILED') || responseText.includes('A server error has occurred')) {
-          friendlyMsg = 'Erro de execução na Vercel (FUNCTION_INVOCATION_FAILED). Verifique as variáveis de ambiente ou logs do deploy.';
+          friendlyMsg = 'Server execution error. Please try again shortly.';
         }
         throw new Error(friendlyMsg);
       }
 
       if (!res.ok) {
-        removeSentTimestamp(sentTs);
-        setSentTimestamps(getSentMessageTimestamps());
         if (data.error === 'VIP_REQUIRED' || data.isLimitReached || (data.error && data.error.code === 'VIP_REQUIRED')) {
           setIsUserUnlimited(false);
           const limitMsg = typeof data.message === 'string' ? data.message : (data.error?.message || limitToast);
@@ -473,6 +468,10 @@ export default function AiAssistantModal({ userId, userEmail, userName, userAvat
         throw new Error(extractedError || errorMessage);
       }
 
+      // ONLY record message usage count when the AI generation was successful
+      recordSentTimestamp();
+      setSentTimestamps(getSentMessageTimestamps());
+
       const botMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -483,8 +482,6 @@ export default function AiAssistantModal({ userId, userEmail, userName, userAvat
       setMessages(prev => [...prev, botMsg]);
     } catch (err: any) {
       console.error('AI Chat Error:', err);
-      removeSentTimestamp(sentTs);
-      setSentTimestamps(getSentMessageTimestamps());
 
       let displayMsg = errorMessage;
       if (err) {

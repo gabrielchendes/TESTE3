@@ -359,13 +359,27 @@ ${userContext?.userName ? `User's Name: ${userContext.userName}` : ''}`;
         temperature: 0.7,
       },
       maxAttemptsPerModel: 2,
-      baseDelayMs: 1200,
+      baseDelayMs: 600,
       logPrefix: '[AI Chat]'
     });
 
     const responseText = result.text;
     const rawReply = responseText || 'Sorry, I could not process a response at the moment. Please try again in a few moments.';
     const reply = rawReply.replace(/\*\*/g, '');
+
+    // Log the successful usage only AFTER the AI successfully generated the reply
+    if (userIdentifier && !isUserUnlimited) {
+      try {
+        await supabaseAdmin
+          .from('ai_message_logs')
+          .insert({
+            user_id: userIdentifier,
+            created_at: new Date().toISOString()
+          });
+      } catch (logErr) {
+        console.warn('[AI Chat API] Note: Failed to log message in ai_message_logs:', logErr);
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -378,7 +392,7 @@ ${userContext?.userName ? `User's Name: ${userContext.userName}` : ''}`;
 
     if (errMsg.includes('GEMINI_API_KEY environment variable is missing')) {
       return res.status(503).json({
-        error: 'GEMINI_API_KEY environment variable is missing',
+        error: 'Gemini API key is not configured on the server. Please check the GEMINI_API_KEY setting.',
         missingKey: true
       });
     }
@@ -392,13 +406,13 @@ ${userContext?.userName ? `User's Name: ${userContext.userName}` : ''}`;
 
     if (isQuotaError) {
       return res.status(429).json({
-        error: 'The temporary limit for AI requests has been reached. Please wait a moment and try again later.'
+        error: 'Temporary AI rate limit reached. Please wait a moment and try again.'
       });
     }
 
-    if (errMsg.includes('503') || errMsg.includes('UNAVAILABLE') || errMsg.includes('high demand')) {
+    if (errMsg.includes('503') || errMsg.includes('UNAVAILABLE') || errMsg.includes('high demand') || errMsg.includes('spikes in demand') || errMsg.includes('overloaded')) {
       return res.status(503).json({
-        error: 'We are experiencing temporarily high demand. Please wait a few seconds and try again later.'
+        error: 'AI servers are experiencing temporarily high demand. Please wait a few seconds and try again.'
       });
     }
 
@@ -416,7 +430,7 @@ ${userContext?.userName ? `User's Name: ${userContext.userName}` : ''}`;
     } catch (_) {}
 
     return res.status(500).json({
-      error: 'Communication error: ' + (cleanError || 'Unknown error')
+      error: 'Connection error with Expert AI: ' + (cleanError || 'Service temporarily unavailable. Please try again.')
     });
   }
 }

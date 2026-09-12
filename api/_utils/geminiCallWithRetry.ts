@@ -56,7 +56,7 @@ export async function generateContentWithRetry(
     contents,
     config,
     maxAttemptsPerModel = 2,
-    baseDelayMs = 800,
+    baseDelayMs = 600,
     logPrefix = '[Gemini Call]'
   } = options;
 
@@ -90,13 +90,15 @@ export async function generateContentWithRetry(
 
         // If high demand 503 error, immediately fall through to the next candidate model
         const isHighDemand = rawErrStr.toLowerCase().includes('high demand') ||
+                             rawErrStr.toLowerCase().includes('spikes in demand') ||
                              rawErrStr.toLowerCase().includes('unavailable') ||
+                             rawErrStr.toLowerCase().includes('overloaded') ||
                              err?.status === 503 ||
                              err?.code === 503 ||
                              err?.error?.code === 503;
 
         if (isHighDemand) {
-          console.info(`${logPrefix} Model ${modelName} experiencing high demand; falling over immediately to next candidate model.`);
+          console.info(`${logPrefix} Model ${modelName} experiencing high demand/overload; falling over immediately to next candidate model.`);
           break;
         }
 
@@ -105,7 +107,7 @@ export async function generateContentWithRetry(
         }
 
         const delay = Math.round(
-          baseDelayMs * Math.pow(1.5, attempt - 1) + Math.random() * 300
+          baseDelayMs * Math.pow(1.5, attempt - 1) + Math.random() * 200
         );
 
         if (attempt < maxAttemptsPerModel || modelName !== candidateModels[candidateModels.length - 1]) {

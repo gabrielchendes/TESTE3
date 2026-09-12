@@ -95,7 +95,7 @@ export async function sendBroadcastNotification(title: string, message: string) 
     }
 
     // Direct fallback
-    const broadcastId = `bc_${Date.now()}`;
+    const broadcastId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : undefined;
     const notifications = allUserIds.map(uid => ({
       user_id: uid,
       broadcast_id: broadcastId,

@@ -1,5 +1,6 @@
 import React, { Suspense, lazy } from 'react';
 import { Loader2 } from 'lucide-react';
+import CustomDirectVideoPlayer from './CustomDirectVideoPlayer';
 
 const LazyReactPlayer: any = lazy(() => import('react-player'));
 
@@ -127,15 +128,11 @@ export default function LessonVideoPlayer({ url, title, onEnded }: LessonVideoPl
       );
     } else {
       content = (
-        <video
-          src={url}
-          controls
-          autoPlay
-          playsInline
-          webkit-playsinline="true"
-          preload="metadata"
-          className="w-full h-full object-contain"
+        <CustomDirectVideoPlayer
+          url={url}
+          title={title}
           onEnded={onEnded}
+          autoPlay={true}
         />
       );
     }
@@ -173,7 +170,7 @@ export default function LessonVideoPlayer({ url, title, onEnded }: LessonVideoPl
   }
 
   return (
-    <div className="absolute inset-0 bg-black group/video-container overflow-hidden rounded-xl">
+    <div className="absolute inset-0 bg-black group/video-container overflow-hidden rounded-2xl sm:rounded-3xl">
       {content}
       
       {/* OneDrive specific overlay remains if needed */}

@@ -434,7 +434,7 @@ export default function CourseViewer({ courseId, userId, onClose, initialCourse,
 
     return (
       <Suspense fallback={
-        <div className="absolute inset-0 bg-black flex items-center justify-center rounded-xl">
+        <div className="absolute inset-0 bg-black flex items-center justify-center rounded-2xl sm:rounded-3xl">
           <Loader2 className="w-8 h-8 animate-spin text-white/40" />
         </div>
       }>
@@ -1005,10 +1005,10 @@ export default function CourseViewer({ courseId, userId, onClose, initialCourse,
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     transition={{ delay: 0.2 }}
-                    className={`relative overflow-hidden border border-white/10 bg-black shadow-2xl transition-all duration-500 w-full ${
+                    className={`relative overflow-hidden bg-black transition-all duration-500 w-full ${
                       activeChapter?.content_type === 'pdf' 
-                        ? 'aspect-[1/1.4] sm:aspect-[3/4] max-h-[85vh] rounded-[2rem] sm:rounded-[3rem] ring-8 ring-white/5 shadow-white/5' 
-                        : 'aspect-video rounded-xl border-white/20'
+                        ? 'aspect-[1/1.4] sm:aspect-[3/4] max-h-[85vh] rounded-[2rem] sm:rounded-[3rem] border border-white/10 ring-8 ring-white/5 shadow-2xl' 
+                        : 'aspect-video rounded-2xl sm:rounded-3xl border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.8)] ring-1 ring-white/10'
                     }`}
                   >
                     {activeChapter?.content_type === 'video' ? (

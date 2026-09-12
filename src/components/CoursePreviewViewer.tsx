@@ -23,6 +23,7 @@ import { useSettings } from '../contexts/SettingsContext';
 import { useI18n } from '../contexts/I18nContext';
 import SupportSection from './SupportSection';
 import FloatingWhatsApp from './FloatingWhatsApp';
+import CustomDirectVideoPlayer from './CustomDirectVideoPlayer';
 
 interface CoursePreviewViewerProps {
   course: Course;
@@ -116,14 +117,10 @@ export default function CoursePreviewViewer({ course, onClose, onPurchase }: Cou
               allowFullScreen
             />
           ) : (
-            <video
-              src={videoUrl}
-              className="w-full h-full object-contain"
-              controls
-              autoPlay
-              playsInline
-              webkit-playsinline="true"
-              preload="metadata"
+            <CustomDirectVideoPlayer
+              url={videoUrl}
+              title={course.title}
+              autoPlay={true}
             />
           )}
         </div>

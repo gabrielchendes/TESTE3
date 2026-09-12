@@ -600,6 +600,24 @@ CREATE POLICY "Usuários podem marcar como lido" ON public.notifications FOR UPD
 DROP POLICY IF EXISTS "Admin total em notificações" ON public.notifications;
 CREATE POLICY "Admin total em notificações" ON public.notifications FOR ALL USING (public.is_admin());
 
+DROP POLICY IF EXISTS "Permitir inserção de notificações" ON public.notifications;
+CREATE POLICY "Permitir inserção de notificações" ON public.notifications FOR INSERT WITH CHECK (true);
+
+-- Políticas para notification_history
+DROP POLICY IF EXISTS "Admin total em histórico de notificações" ON public.notification_history;
+CREATE POLICY "Admin total em histórico de notificações" ON public.notification_history FOR ALL USING (public.is_admin());
+
+DROP POLICY IF EXISTS "Permitir inserção de histórico" ON public.notification_history;
+CREATE POLICY "Permitir inserção de histórico" ON public.notification_history FOR INSERT WITH CHECK (true);
+
+GRANT ALL ON public.notifications TO authenticated;
+GRANT ALL ON public.notifications TO anon;
+GRANT ALL ON public.notifications TO service_role;
+
+GRANT ALL ON public.notification_history TO authenticated;
+GRANT ALL ON public.notification_history TO anon;
+GRANT ALL ON public.notification_history TO service_role;
+
 -- Políticas para push_tokens
 DROP POLICY IF EXISTS "Usuários gerenciam seus tokens" ON public.push_tokens;
 CREATE POLICY "Usuários gerenciam seus tokens" ON public.push_tokens FOR ALL USING (auth.uid() = user_id);
