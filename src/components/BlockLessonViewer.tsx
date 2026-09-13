@@ -32,6 +32,8 @@ import { LessonBlock, LessonBlockItem } from '../types/lms';
 import { supabase } from '../lib/supabase';
 import { toast } from 'sonner';
 import { showToast } from '../lib/customToast';
+import { getCloudflareStreamEmbedUrl, isCloudflareStreamUrl, isDirectVideoUrl } from '../utils/videoUtils';
+import CustomDirectVideoPlayer from './CustomDirectVideoPlayer';
 
 const BlockLessonChart = lazy(() => import('./BlockLessonChart'));
 
@@ -1209,16 +1211,11 @@ export const BlockLessonViewer: React.FC<BlockLessonViewerProps> = ({
               {block.type === 'video' && block.url && (
                 <div className="space-y-3">
                   <div className="aspect-video w-full rounded-2xl overflow-hidden border border-white/10 bg-black">
-                    {block.url.includes('r2.dev') || 
-                     block.url.includes('cloudflare') || 
-                     block.url.match(/\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i) ? (
-                      <video
-                        src={block.url}
-                        controls
-                        playsInline
-                        webkit-playsinline="true"
-                        preload="metadata"
-                        className="w-full h-full object-contain"
+                    {isCloudflareStreamUrl(block.url) || isDirectVideoUrl(block.url) ? (
+                      <CustomDirectVideoPlayer
+                        url={block.url}
+                        title={block.title || title || 'Lesson Video'}
+                        autoPlay={false}
                       />
                     ) : (
                       <iframe

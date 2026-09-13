@@ -6,11 +6,13 @@ import {
   VolumeX, 
   Maximize, 
   Minimize, 
-  RotateCcw,
+  Sliders,
   Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import Hls from 'hls.js';
 import { GlowingSpinner } from './GlowingSpinner';
+import { getCloudflareHlsUrl, getCloudflareStreamEmbedUrl, isCloudflareStreamUrl } from '../utils/videoUtils';
 
 interface CustomDirectVideoPlayerProps {
   url: string;
@@ -20,6 +22,14 @@ interface CustomDirectVideoPlayerProps {
 }
 
 const PLAYBACK_SPEEDS = [0.75, 1.0, 1.25, 1.5, 1.75, 2.0];
+
+const DEFAULT_QUALITIES = [
+  { label: 'Auto', value: 'auto' },
+  { label: '1080p (Full HD)', value: '1080p' },
+  { label: '720p (HD)', value: '720p' },
+  { label: '480p (SD)', value: '480p' },
+  { label: '360p (Low)', value: '360p' },
+];
 
 function Rewind10Icon({ className = "w-5 h-5 sm:w-6 sm:h-6" }: { className?: string }) {
   return (
@@ -112,14 +122,104 @@ export default function CustomDirectVideoPlayer({
   const [isMuted, setIsMuted] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isSimulatedFullscreen, setIsSimulatedFullscreen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isBuffering, setIsBuffering] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
+  const [showQualityMenu, setShowQualityMenu] = useState(false);
+  const [selectedQuality, setSelectedQuality] = useState('auto');
+  const [hlsLevels, setHlsLevels] = useState<{ label: string; value: string; height?: number }[]>([]);
+  const [useIframeFallback, setUseIframeFallback] = useState(false);
+  const hlsRef = useRef<Hls | null>(null);
   const [skipFeedback, setSkipFeedback] = useState<{ id: number; type: 'back' | 'forward' } | null>(null);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubTime, setScrubTime] = useState(0);
   const wasPlayingBeforeScrubRef = useRef(false);
+
+  // Initialize media source: HLS for Cloudflare Stream & .m3u8, or native HTML5 for direct video
+  useEffect(() => {
+    setUseIframeFallback(false);
+    const video = videoRef.current;
+    if (!video) return;
+
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    const hlsUrl = getCloudflareHlsUrl(url);
+    const effectiveUrl = hlsUrl || url;
+    const isHls = effectiveUrl.includes('.m3u8') || effectiveUrl.includes('/manifest');
+
+    if (isHls && Hls.isSupported()) {
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: true,
+        backBufferLength: 60,
+      });
+      hlsRef.current = hls;
+
+      hls.loadSource(effectiveUrl);
+      hls.attachMedia(video);
+
+      hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
+        setIsLoading(false);
+        if (data.levels && data.levels.length > 0) {
+          const parsed = data.levels.map((lvl, index) => ({
+            label: lvl.height ? `${lvl.height}p` : `Level ${index + 1}`,
+            value: String(index),
+            height: lvl.height,
+          }));
+          parsed.sort((a, b) => (b.height || 0) - (a.height || 0));
+          setHlsLevels(parsed);
+        }
+        if (autoPlay) {
+          video.play().catch(() => {});
+        }
+      });
+
+      hls.on(Hls.Events.ERROR, (_event, data) => {
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              console.warn('HLS Network Error, attempting load recovery...', data);
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              console.warn('HLS Media Error, attempting media recovery...', data);
+              hls.recoverMediaError();
+              break;
+            default:
+              console.warn('Fatal HLS error, switching to Cloudflare iframe fallback:', data);
+              if (isCloudflareStreamUrl(url)) {
+                setUseIframeFallback(true);
+              }
+              break;
+          }
+        }
+      });
+    } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native Apple Safari HLS playback
+      video.src = effectiveUrl;
+      if (autoPlay) {
+        video.play().catch(() => {});
+      }
+    } else {
+      // Direct MP4, WebM, Cloudflare R2, etc.
+      video.src = effectiveUrl;
+      if (autoPlay) {
+        video.play().catch(() => {});
+      }
+    }
+
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [url, autoPlay]);
 
   // Initialize and attach video events
   useEffect(() => {
@@ -177,14 +277,56 @@ export default function CustomDirectVideoPlayer({
     };
   }, [isScrubbing, onEnded]);
 
-  // Fullscreen change listener
+  // Fullscreen change listener supporting all engines and mobile browsers (iOS/WebKit)
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isDocFs = !!(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+      setIsFullscreen(isDocFs || isSimulatedFullscreen);
     };
+
+    const video = videoRef.current;
+    const handleVideoEnterFs = () => setIsFullscreen(true);
+    const handleVideoExitFs = () => setIsFullscreen(false);
+
     document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    if (video) {
+      video.addEventListener('webkitbeginfullscreen', handleVideoEnterFs);
+      video.addEventListener('webkitendfullscreen', handleVideoExitFs);
+    }
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+      if (video) {
+        video.removeEventListener('webkitbeginfullscreen', handleVideoEnterFs);
+        video.removeEventListener('webkitendfullscreen', handleVideoExitFs);
+      }
+    };
+  }, [isSimulatedFullscreen]);
+
+  // Handle ESC key for simulated fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isSimulatedFullscreen) {
+        setIsSimulatedFullscreen(false);
+        setIsFullscreen(false);
+        document.body.style.overflow = '';
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSimulatedFullscreen]);
 
   // Controls auto-hide timer
   const resetControlsTimer = () => {
@@ -320,37 +462,162 @@ export default function CustomDirectVideoPlayer({
     resetControlsTimer();
   };
 
-  const toggleFullscreen = () => {
-    const container = containerRef.current;
-    if (!container) return;
-    if (!document.fullscreenElement) {
-      if (container.requestFullscreen) {
-        container.requestFullscreen();
+  const handleQualitySelect = (qualityValue: string, label?: string) => {
+    setSelectedQuality(label || qualityValue);
+    setShowQualityMenu(false);
+    resetControlsTimer();
+
+    if (hlsRef.current) {
+      if (qualityValue === 'auto') {
+        hlsRef.current.currentLevel = -1; // -1 represents Auto level in hls.js
+      } else {
+        const lvlIdx = parseInt(qualityValue, 10);
+        if (!isNaN(lvlIdx)) {
+          hlsRef.current.currentLevel = lvlIdx;
+        }
       }
+      return;
+    }
+
+    const video = videoRef.current;
+    if (!video) return;
+
+    // If the video URL has quality parameters, apply cleanly while preserving playback position
+    if (url.includes('quality=') || url.includes('rendition=') || url.includes('res=')) {
+      const currentPos = video.currentTime;
+      const wasPlaying = !video.paused;
+      const updatedUrl = url.replace(/(quality|rendition|res)=[^&]+/, `$1=${qualityValue}`);
+      video.src = updatedUrl;
+      video.currentTime = currentPos;
+      if (wasPlaying) video.play().catch(() => {});
+    }
+  };
+
+  const toggleFullscreen = async () => {
+    const container = containerRef.current;
+    const video = videoRef.current;
+    if (!container) return;
+
+    const isCurrentFs = isFullscreen || isSimulatedFullscreen || !!(
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      (document as any).mozFullScreenElement ||
+      (document as any).msFullscreenElement
+    );
+
+    if (isCurrentFs) {
+      // Exit fullscreen mode
+      try {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if ((document as any).webkitExitFullscreen) {
+          (document as any).webkitExitFullscreen();
+        } else if ((document as any).mozCancelFullScreen) {
+          (document as any).mozCancelFullScreen();
+        } else if ((document as any).msExitFullscreen) {
+          (document as any).msExitFullscreen();
+        } else if (video && (video as any).webkitExitFullscreen) {
+          (video as any).webkitExitFullscreen();
+        }
+      } catch (err) {
+        console.warn('Exit fullscreen error:', err);
+      }
+      setIsSimulatedFullscreen(false);
+      setIsFullscreen(false);
+      document.body.style.overflow = '';
     } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen();
+      // Enter fullscreen mode
+      let success = false;
+
+      // 1. Try standard container fullscreen (Android Chrome, iPad, Desktop)
+      try {
+        if (container.requestFullscreen) {
+          await container.requestFullscreen();
+          success = true;
+        } else if ((container as any).webkitRequestFullscreen) {
+          (container as any).webkitRequestFullscreen();
+          success = true;
+        } else if ((container as any).mozRequestFullScreen) {
+          (container as any).mozRequestFullScreen();
+          success = true;
+        } else if ((container as any).msRequestFullscreen) {
+          (container as any).msRequestFullscreen();
+          success = true;
+        }
+      } catch (err) {
+        console.warn('Container requestFullscreen failed:', err);
+      }
+
+      // 2. On iPhone iOS Safari or mobile browsers where container fullscreen is not allowed on <div> elements,
+      // call webkitEnterFullscreen directly on the <video> element
+      if (!success && video) {
+        try {
+          if ((video as any).webkitEnterFullscreen) {
+            (video as any).webkitEnterFullscreen();
+            success = true;
+          } else if (video.requestFullscreen) {
+            await video.requestFullscreen();
+            success = true;
+          } else if ((video as any).webkitRequestFullscreen) {
+            (video as any).webkitRequestFullscreen();
+            success = true;
+          }
+        } catch (err) {
+          console.warn('Video element fullscreen failed:', err);
+        }
+      }
+
+      // 3. Fallback: If native fullscreen is blocked (e.g. within restricted iframe or PWA policy), activate simulated fullscreen
+      if (!success) {
+        setIsSimulatedFullscreen(true);
+        setIsFullscreen(true);
+        document.body.style.overflow = 'hidden';
       }
     }
+
     resetControlsTimer();
   };
 
   const activeDisplayTime = isScrubbing ? scrubTime : currentTime;
   const progressPercent = duration > 0 ? (activeDisplayTime / duration) * 100 : 0;
 
+  // If iframe fallback is triggered for Cloudflare Stream
+  if (useIframeFallback) {
+    const embedUrl = getCloudflareStreamEmbedUrl(url) || url;
+    return (
+      <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
+        <iframe
+          src={embedUrl}
+          className="w-full h-full border-0 absolute inset-0"
+          allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen"
+          allowFullScreen
+          title={title}
+        />
+      </div>
+    );
+  }
+
+  const qualityList = hlsLevels.length > 0
+    ? [{ label: 'Auto', value: 'auto' }, ...hlsLevels]
+    : DEFAULT_QUALITIES;
+
+  const currentQualityDisplay = selectedQuality === 'auto' ? 'Auto' : selectedQuality;
+
   return (
     <div
       ref={containerRef}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      className="group relative w-full h-full bg-black select-none overflow-hidden flex items-center justify-center font-sans"
+      className={`group relative w-full h-full bg-black select-none overflow-hidden flex items-center justify-center font-sans ${
+        isSimulatedFullscreen ? 'fixed inset-0 z-[99999] w-screen h-screen' : ''
+      }`}
     >
       {/* HTML5 Native Video Tag */}
       <video
         ref={videoRef}
-        src={url}
         autoPlay={autoPlay}
         playsInline
+        webkit-playsinline="true"
         preload="metadata"
         onClick={togglePlay}
         className="w-full h-full object-contain cursor-pointer"
@@ -531,7 +798,10 @@ export default function CustomDirectVideoPlayer({
             <div className="relative">
               <button
                 type="button"
-                onClick={() => setShowSpeedMenu(!showSpeedMenu)}
+                onClick={() => {
+                  setShowSpeedMenu(!showSpeedMenu);
+                  setShowQualityMenu(false);
+                }}
                 className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-xs font-bold text-white transition-all cursor-pointer active:scale-95"
                 title="Playback speed"
               >
@@ -568,21 +838,56 @@ export default function CustomDirectVideoPlayer({
               </AnimatePresence>
             </div>
 
-            {/* Restart Button */}
-            <button
-              type="button"
-              onClick={() => {
-                if (videoRef.current) {
-                  videoRef.current.currentTime = 0;
-                  videoRef.current.play().catch(() => {});
-                }
-              }}
-              className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition-all cursor-pointer active:scale-90"
-              title="Restart from beginning"
-              aria-label="Restart from beginning"
-            >
-              <RotateCcw size={18} />
-            </button>
+            {/* Video Quality Selector */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowQualityMenu(!showQualityMenu);
+                  setShowSpeedMenu(false);
+                  resetControlsTimer();
+                }}
+                className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-xs font-bold text-white transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                title="Video quality"
+                aria-label="Video quality"
+              >
+                <Sliders size={13} className="text-primary" />
+                <span className="text-[11px] font-semibold">{currentQualityDisplay}</span>
+              </button>
+
+              <AnimatePresence>
+                {showQualityMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute bottom-full right-0 mb-2 py-1.5 w-40 rounded-2xl bg-zinc-900/95 border border-white/15 backdrop-blur-xl shadow-2xl z-50 flex flex-col max-h-56 overflow-y-auto"
+                  >
+                    <div className="px-3 py-1 text-[10px] uppercase font-bold text-white/40 tracking-wider border-b border-white/5 flex items-center justify-between">
+                      <span>Quality</span>
+                      <span className="text-primary font-mono text-[9px] font-bold">HD</span>
+                    </div>
+                    {qualityList.map((q) => {
+                      const isSelected = selectedQuality === q.value || selectedQuality === q.label;
+                      return (
+                        <button
+                          key={q.value}
+                          type="button"
+                          onClick={() => handleQualitySelect(q.value, q.label)}
+                          className={`px-3 py-1.5 text-xs text-left font-medium transition-colors hover:bg-white/10 flex items-center justify-between ${
+                            isSelected ? 'text-primary font-bold bg-primary/10' : 'text-white/80'
+                          }`}
+                        >
+                          <span className="truncate">{q.label}</span>
+                          {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
 
             {/* Fullscreen Toggle */}
             <button

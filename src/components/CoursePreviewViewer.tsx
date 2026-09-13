@@ -24,6 +24,7 @@ import { useI18n } from '../contexts/I18nContext';
 import SupportSection from './SupportSection';
 import FloatingWhatsApp from './FloatingWhatsApp';
 import CustomDirectVideoPlayer from './CustomDirectVideoPlayer';
+import { getCloudflareStreamEmbedUrl, isCloudflareStreamUrl, isDirectVideoUrl } from '../utils/videoUtils';
 
 interface CoursePreviewViewerProps {
   course: Course;
@@ -93,28 +94,23 @@ export default function CoursePreviewViewer({ course, onClose, onPurchase }: Cou
           const id = videoUrl.match(/\/file\/d\/([a-zA-Z0-9_-]+)/)?.[1] || videoUrl.match(/id=([a-zA-Z0-9_-]+)/)?.[1] || videoUrl.match(/\/d\/([a-zA-Z0-9_-]+)/)?.[1];
           return `https://drive.google.com/file/d/${id}/preview`;
         }
-        if (videoUrl.includes('iframe.videodelivery.net')) {
-          return videoUrl;
-        }
-        if (videoUrl.includes('cloudflarestream.com') || videoUrl.includes('videodelivery.net')) {
-          const streamId = videoUrl.split('/').pop()?.split('?')[0];
-          return `https://iframe.videodelivery.net/${streamId}`;
+        if (isCloudflareStreamUrl(videoUrl)) {
+          return getCloudflareStreamEmbedUrl(videoUrl) || videoUrl;
         }
         return videoUrl;
       };
 
-      const isDirectOrCloudflare = videoUrl.includes('r2.dev') || 
-                                  videoUrl.includes('cloudflare') || 
-                                  videoUrl.match(/\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i);
+      const isDirectOrCloudflare = isDirectVideoUrl(videoUrl);
 
       return (
         <div className="relative aspect-video w-full bg-black rounded-[2.5rem] overflow-hidden shadow-2xl border border-white/10 ring-1 ring-white/5">
-          {isYouTube || isVimeo || isDrive || videoUrl.includes('videodelivery.net') || videoUrl.includes('cloudflarestream.com') ? (
+          {isYouTube || isVimeo || isDrive ? (
             <iframe
               src={getEmbedUrl()}
               className="w-full h-full border-0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
               allowFullScreen
+              referrerPolicy="no-referrer"
             />
           ) : (
             <CustomDirectVideoPlayer

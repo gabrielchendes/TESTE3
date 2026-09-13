@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { Loader2 } from 'lucide-react';
 import CustomDirectVideoPlayer from './CustomDirectVideoPlayer';
+import { getCloudflareStreamEmbedUrl, isCloudflareStreamUrl, isDirectVideoUrl } from '../utils/videoUtils';
 
 const LazyReactPlayer: any = lazy(() => import('react-player'));
 
@@ -97,45 +98,21 @@ export default function LessonVideoPlayer({ url, title, onEnded }: LessonVideoPl
       />
     );
   }
-  // 5. Cloudflare Stream, Cloudflare R2, or native HTML5 video (mp4, webm, mov, ogg, etc.)
+  // 5. Cloudflare Stream, Cloudflare R2, or native HTML5 video (mp4, webm, mov, ogg, m3u8, etc.)
   else if (
+    isCloudflareStreamUrl(url) ||
     url.includes('r2.dev') || 
     url.includes('cloudflare') || 
-    url.includes('videodelivery.net') || 
-    url.includes('cloudflarestream.com') ||
-    url.match(/\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i)
+    isDirectVideoUrl(url)
   ) {
-    if (url.includes('iframe.videodelivery.net') || (url.includes('cloudflarestream.com') && url.includes('/iframe'))) {
-      content = (
-        <iframe
-          src={url}
-          className="w-full h-full border-0 absolute inset-0"
-          allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
-          allowFullScreen
-          title={title}
-        />
-      );
-    } else if (url.includes('cloudflarestream.com') || url.includes('videodelivery.net')) {
-      const streamId = url.split('/').pop()?.split('?')[0];
-      content = (
-        <iframe
-          src={`https://iframe.videodelivery.net/${streamId}`}
-          className="w-full h-full border-0 absolute inset-0"
-          allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture;"
-          allowFullScreen
-          title={title}
-        />
-      );
-    } else {
-      content = (
-        <CustomDirectVideoPlayer
-          url={url}
-          title={title}
-          onEnded={onEnded}
-          autoPlay={true}
-        />
-      );
-    }
+    content = (
+      <CustomDirectVideoPlayer
+        url={url}
+        title={title}
+        onEnded={onEnded}
+        autoPlay={true}
+      />
+    );
   }
   // 6. Generic Fallback: Dynamic ReactPlayer loaded strictly on-demand
   else {

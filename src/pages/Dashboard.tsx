@@ -184,7 +184,14 @@ export default function Dashboard({ user }: DashboardProps) {
       setCanInstall(false);
     }
 
+    // Preload tab chunks in background on idle so switching to profile or community is instant
+    const preloadTimer = setTimeout(() => {
+      import('../components/Profile');
+      import('../components/Community');
+    }, 1200);
+
     return () => {
+      clearTimeout(preloadTimer);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
@@ -940,8 +947,8 @@ export default function Dashboard({ user }: DashboardProps) {
                 <PullToRefresh onRefresh={handleGlobalRefresh}>
                   <Suspense fallback={<ComponentLoader />}>
                     <Community key={`community-${refreshKey}`} user={user} />
+                    <SupportSection page="community" settings={settings} t={t} />
                   </Suspense>
-                  <SupportSection page="community" settings={settings} t={t} />
                 </PullToRefresh>
               ) : activeTab === 'admin' ? (
                 <Suspense fallback={<ComponentLoader />}>
@@ -956,8 +963,8 @@ export default function Dashboard({ user }: DashboardProps) {
                       canInstall={canInstall}
                       onInstall={() => setShowPWAInstall(true)}
                     />
+                    <SupportSection page="profile" settings={settings} t={t} />
                   </Suspense>
-                  <SupportSection page="profile" settings={settings} t={t} />
                 </PullToRefresh>
               )}
         </div>
