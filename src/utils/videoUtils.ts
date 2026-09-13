@@ -95,12 +95,35 @@ export function isCloudflareStreamUrl(url: string): boolean {
 
 export function cleanVideoUrl(rawUrl: string): string {
   if (!rawUrl) return '';
-  const trimmed = rawUrl.trim();
+  let trimmed = rawUrl.trim();
+
+  // If user pasted raw iframe HTML like <iframe src="..." ... />
   const iframeMatch = trimmed.match(/src=["']([^"']+)["']/i);
   if (iframeMatch && iframeMatch[1]) {
-    return iframeMatch[1].trim();
+    trimmed = iframeMatch[1].trim();
   }
+
+  // Ensure HTTPS for Cloudflare R2, Stream, and external storage to avoid Mixed Content blocking on Vercel
+  if (trimmed.startsWith('http://')) {
+    trimmed = trimmed.replace('http://', 'https://');
+  }
+
+  // Encode unencoded whitespace in file paths (e.g. Brazilian lesson names: "Aula 01.mp4" -> "Aula%2001.mp4")
+  if (trimmed.includes(' ') && !trimmed.includes('%20')) {
+    trimmed = trimmed.replace(/ /g, '%20');
+  }
+
   return trimmed;
+}
+
+export function getVideoMimeType(url: string): string {
+  if (!url) return 'video/mp4';
+  const clean = url.split('?')[0].toLowerCase();
+  if (clean.endsWith('.webm')) return 'video/webm';
+  if (clean.endsWith('.mov')) return 'video/mp4';
+  if (clean.endsWith('.ogg') || clean.endsWith('.ogv')) return 'video/ogg';
+  if (clean.endsWith('.m3u8')) return 'application/x-mpegURL';
+  return 'video/mp4';
 }
 
 export function isDirectVideoUrl(url: string): boolean {

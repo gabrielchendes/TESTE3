@@ -189,6 +189,10 @@ export default function CustomDirectVideoPlayer({
     const video = videoRef.current;
     if (!video) return;
 
+    try {
+      (video as any).referrerPolicy = 'no-referrer';
+    } catch {}
+
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
@@ -320,23 +324,36 @@ export default function CustomDirectVideoPlayer({
       });
     } else if (isHls && video.canPlayType('application/vnd.apple.mpegurl')) {
       // Native Apple Safari HLS playback
+      setIsLoading(true);
       video.src = effectiveUrl;
+      video.load();
       if (autoPlay) {
-        video.play().catch((err) => {
+        video.play().then(() => {
+          setIsPlaying(true);
+          setIsLoading(false);
+        }).catch((err) => {
           console.log('[Player] Autoplay prevented by browser, click play to start:', err?.message);
           setIsPlaying(false);
           setIsLoading(false);
         });
+      } else {
+        setIsLoading(false);
       }
     } else {
       // Direct MP4, WebM, Cloudflare R2, Supabase Storage, etc.
       video.src = effectiveUrl;
+      video.load();
       if (autoPlay) {
-        video.play().catch((err) => {
+        video.play().then(() => {
+          setIsPlaying(true);
+          setIsLoading(false);
+        }).catch((err) => {
           console.log('[Player] Autoplay prevented by browser, click play to start:', err?.message);
           setIsPlaying(false);
           setIsLoading(false);
         });
+      } else {
+        setIsLoading(false);
       }
     }
 
@@ -356,12 +373,18 @@ export default function CustomDirectVideoPlayer({
     const handleLoadedMetadata = () => {
       setDuration(video.duration || 0);
       setIsLoading(false);
+      setIsBuffering(false);
       if (video.videoHeight) {
         setNativeResolution(`${video.videoHeight}p`);
         if (!activeHeight) {
           setActiveHeight(video.videoHeight);
         }
       }
+    };
+
+    const handleLoadedData = () => {
+      setIsLoading(false);
+      setIsBuffering(false);
     };
 
     const handleTimeUpdate = () => {
@@ -373,7 +396,10 @@ export default function CustomDirectVideoPlayer({
       }
     };
 
-    const handlePlay = () => setIsPlaying(true);
+    const handlePlay = () => {
+      setIsPlaying(true);
+      setIsLoading(false);
+    };
     const handlePause = () => setIsPlaying(false);
     const handleWaiting = () => setIsBuffering(true);
     const handlePlaying = () => {
@@ -389,7 +415,7 @@ export default function CustomDirectVideoPlayer({
       if (onEnded) onEnded();
     };
     const handleVideoError = () => {
-      console.warn('[Player] Video element error:', video.error);
+      console.warn('[Player] Video element error:', video.error?.code, video.error?.message);
       setIsLoading(false);
       setIsBuffering(false);
       const cleaned = cleanVideoUrl(url);
@@ -399,7 +425,13 @@ export default function CustomDirectVideoPlayer({
       }
     };
 
+    // If metadata was already cached by browser
+    if (video.readyState >= 1) {
+      handleLoadedMetadata();
+    }
+
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
+    video.addEventListener('loadeddata', handleLoadedData);
     video.addEventListener('timeupdate', handleTimeUpdate);
     video.addEventListener('play', handlePlay);
     video.addEventListener('pause', handlePause);
@@ -411,6 +443,7 @@ export default function CustomDirectVideoPlayer({
 
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      video.removeEventListener('loadeddata', handleLoadedData);
       video.removeEventListener('timeupdate', handleTimeUpdate);
       video.removeEventListener('play', handlePlay);
       video.removeEventListener('pause', handlePause);
@@ -506,11 +539,7 @@ export default function CustomDirectVideoPlayer({
   };
 
   const handleVideoClick = () => {
-    if (!showControls) {
-      resetControlsTimer();
-    } else {
-      togglePlay();
-    }
+    togglePlay();
   };
 
   const seekRelative = (seconds: number) => {
@@ -880,6 +909,13 @@ export default function CustomDirectVideoPlayer({
       ref={containerRef}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
+      onClick={(e) => {
+        const target = e.target as HTMLElement;
+        if (target.closest('button') || target.closest('input') || target.closest('.group\\/track')) {
+          return;
+        }
+        togglePlay();
+      }}
       className={`group relative w-full h-full bg-black select-none overflow-hidden flex items-center justify-center font-sans ${
         isSimulatedFullscreen ? 'fixed inset-0 z-[9999999] w-screen h-screen' : ''
       }`}
@@ -887,11 +923,10 @@ export default function CustomDirectVideoPlayer({
       {/* HTML5 Native Video Tag */}
       <video
         ref={videoRef}
-        autoPlay={autoPlay}
         playsInline
         webkit-playsinline="true"
-        preload="metadata"
-        onClick={handleVideoClick}
+        preload="auto"
+        referrerPolicy="no-referrer"
         className="w-full h-full object-contain cursor-pointer"
       />
 
@@ -929,13 +964,13 @@ export default function CustomDirectVideoPlayer({
 
       {/* Loading / Buffering Spinner Overlay with Glow */}
       <AnimatePresence>
-        {(isLoading || isBuffering) && (
+        {(isLoading || isBuffering) && isPlaying && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="absolute inset-0 bg-black/60 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3.5 z-20 pointer-events-none"
+            className="absolute inset-0 bg-black/60 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3.5 z-10 pointer-events-none"
           >
             <GlowingSpinner size="lg" color="primary" glow={true} />
             <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/10 backdrop-blur-md shadow-xl text-white text-[11px] font-mono font-medium tracking-wider uppercase">
@@ -975,11 +1010,14 @@ export default function CustomDirectVideoPlayer({
       </AnimatePresence>
 
       {/* Center Click-to-Play Pulse Visualizer when Paused */}
-      {!isPlaying && !isLoading && (
+      {!isPlaying && (
         <button
           type="button"
-          onClick={togglePlay}
-          className="absolute z-10 w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-primary/90 hover:bg-primary text-white flex items-center justify-center shadow-[0_0_50px_rgba(var(--primary-rgb),0.7)] backdrop-blur-sm border border-white/25 transition-all hover:scale-110 active:scale-95 cursor-pointer"
+          onClick={(e) => {
+            e.stopPropagation();
+            togglePlay();
+          }}
+          className="absolute z-20 w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-primary/90 hover:bg-primary text-white flex items-center justify-center shadow-[0_0_50px_rgba(var(--primary-rgb),0.7)] backdrop-blur-sm border border-white/25 transition-all hover:scale-110 active:scale-95 cursor-pointer"
           title="Play"
           aria-label="Play"
         >
