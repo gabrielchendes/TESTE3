@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { 
   Play, 
   Pause, 
@@ -6,8 +7,10 @@ import {
   VolumeX, 
   Maximize, 
   Minimize, 
-  Sliders,
-  Sparkles
+  Settings,
+  Sparkles,
+  X,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Hls from 'hls.js';
@@ -129,13 +132,55 @@ export default function CustomDirectVideoPlayer({
   const [showSpeedMenu, setShowSpeedMenu] = useState(false);
   const [showQualityMenu, setShowQualityMenu] = useState(false);
   const [selectedQuality, setSelectedQuality] = useState('auto');
-  const [hlsLevels, setHlsLevels] = useState<{ label: string; value: string; height?: number }[]>([]);
+  const [hlsLevels, setHlsLevels] = useState<{ label: string; shortLabel: string; value: string; height?: number }[]>([]);
+  const [activeHeight, setActiveHeight] = useState<number | null>(null);
+  const [nativeResolution, setNativeResolution] = useState<string | null>(null);
+  const [qualityNotification, setQualityNotification] = useState<string | null>(null);
+  const qualityNotificationTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [useIframeFallback, setUseIframeFallback] = useState(false);
   const hlsRef = useRef<Hls | null>(null);
   const [skipFeedback, setSkipFeedback] = useState<{ id: number; type: 'back' | 'forward' } | null>(null);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubTime, setScrubTime] = useState(0);
   const wasPlayingBeforeScrubRef = useRef(false);
+  const speedMenuRef = useRef<HTMLDivElement | null>(null);
+  const qualityMenuRef = useRef<HTMLDivElement | null>(null);
+  const mobileQualityMenuRef = useRef<HTMLDivElement | null>(null);
+
+  const showQualityNotification = (msg: string) => {
+    if (qualityNotificationTimerRef.current) {
+      clearTimeout(qualityNotificationTimerRef.current);
+    }
+    setQualityNotification(msg);
+    qualityNotificationTimerRef.current = setTimeout(() => {
+      setQualityNotification(null);
+    }, 2500);
+  };
+
+  // Close menus on outside click & cleanup
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent | TouchEvent) => {
+      const target = e.target as Node;
+      const clickedQuality = 
+        (qualityMenuRef.current && qualityMenuRef.current.contains(target)) ||
+        (mobileQualityMenuRef.current && mobileQualityMenuRef.current.contains(target));
+      if (!clickedQuality) {
+        setShowQualityMenu(false);
+      }
+      if (speedMenuRef.current && !speedMenuRef.current.contains(target)) {
+        setShowSpeedMenu(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handleOutsideClick);
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsideClick);
+      if (qualityNotificationTimerRef.current) {
+        clearTimeout(qualityNotificationTimerRef.current);
+      }
+      document.body.style.overflow = '';
+    };
+  }, []);
 
   // Initialize media source: HLS for Cloudflare Stream & .m3u8, or native HTML5 for direct video
   useEffect(() => {
@@ -155,8 +200,11 @@ export default function CustomDirectVideoPlayer({
     if (isHls && Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true,
-        backBufferLength: 60,
+        lowLatencyMode: false,
+        maxBufferLength: 10, // Keep forward buffer responsive for instant quality changes
+        maxMaxBufferLength: 20,
+        backBufferLength: 10,
+        capLevelToPlayerSize: false,
       });
       hlsRef.current = hls;
 
@@ -166,17 +214,39 @@ export default function CustomDirectVideoPlayer({
       hls.on(Hls.Events.MANIFEST_PARSED, (_event, data) => {
         setIsLoading(false);
         if (data.levels && data.levels.length > 0) {
-          const parsed = data.levels.map((lvl, index) => ({
-            label: lvl.height ? `${lvl.height}p` : `Level ${index + 1}`,
-            value: String(index),
-            height: lvl.height,
-          }));
+          const parsed = data.levels.map((lvl, index) => {
+            const h = lvl.height || (lvl as any).attrs?.RESOLUTION?.height || 0;
+            let label = h ? `${h}p` : `Qualidade ${index + 1}`;
+            if (h >= 1080) label += ' (Full HD)';
+            else if (h >= 720) label += ' (HD)';
+            else if (h >= 480) label += ' (SD)';
+            else if (h > 0) label += ' (Low)';
+
+            return {
+              label,
+              shortLabel: h ? `${h}p` : `Lvl ${index + 1}`,
+              value: String(index),
+              height: h,
+            };
+          });
           parsed.sort((a, b) => (b.height || 0) - (a.height || 0));
           setHlsLevels(parsed);
         }
         if (autoPlay) {
           video.play().catch(() => {});
         }
+      });
+
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
+        const lvl = hls.levels[data.level];
+        if (lvl && lvl.height) {
+          setActiveHeight(lvl.height);
+        }
+        setIsBuffering(false);
+      });
+
+      hls.on(Hls.Events.FRAG_BUFFERED, () => {
+        setIsBuffering(false);
       });
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
@@ -229,6 +299,12 @@ export default function CustomDirectVideoPlayer({
     const handleLoadedMetadata = () => {
       setDuration(video.duration || 0);
       setIsLoading(false);
+      if (video.videoHeight) {
+        setNativeResolution(`${video.videoHeight}p`);
+        if (!activeHeight) {
+          setActiveHeight(video.videoHeight);
+        }
+      }
     };
 
     const handleTimeUpdate = () => {
@@ -332,10 +408,10 @@ export default function CustomDirectVideoPlayer({
   const resetControlsTimer = () => {
     setShowControls(true);
     if (hideControlsTimeoutRef.current) clearTimeout(hideControlsTimeoutRef.current);
-    if (isPlaying && !showSpeedMenu && !isScrubbing) {
+    if (isPlaying && !showSpeedMenu && !showQualityMenu && !isScrubbing) {
       hideControlsTimeoutRef.current = setTimeout(() => {
         setShowControls(false);
-      }, 3200);
+      }, 3500);
     }
   };
 
@@ -344,7 +420,7 @@ export default function CustomDirectVideoPlayer({
   };
 
   const handleMouseLeave = () => {
-    if (isPlaying && !showSpeedMenu && !isScrubbing) {
+    if (isPlaying && !showSpeedMenu && !showQualityMenu && !isScrubbing) {
       setShowControls(false);
     }
   };
@@ -358,6 +434,14 @@ export default function CustomDirectVideoPlayer({
       video.pause();
     }
     resetControlsTimer();
+  };
+
+  const handleVideoClick = () => {
+    if (!showControls) {
+      resetControlsTimer();
+    } else {
+      togglePlay();
+    }
   };
 
   const seekRelative = (seconds: number) => {
@@ -462,27 +546,83 @@ export default function CustomDirectVideoPlayer({
     resetControlsTimer();
   };
 
-  const handleQualitySelect = (qualityValue: string, label?: string) => {
-    setSelectedQuality(label || qualityValue);
+  const handleQualitySelect = (qualityValue: string, label?: string, shortLabel?: string) => {
+    const displayLabel = shortLabel || label || qualityValue;
     setShowQualityMenu(false);
     resetControlsTimer();
 
     if (hlsRef.current) {
+      const hls = hlsRef.current;
+      const video = videoRef.current;
+
       if (qualityValue === 'auto') {
-        hlsRef.current.currentLevel = -1; // -1 represents Auto level in hls.js
+        hls.currentLevel = -1;
+        hls.loadLevel = -1;
+        hls.nextLevel = -1;
+        setSelectedQuality('auto');
+        showQualityNotification('Qualidade: Automática');
       } else {
-        const lvlIdx = parseInt(qualityValue, 10);
-        if (!isNaN(lvlIdx)) {
-          hlsRef.current.currentLevel = lvlIdx;
+        let lvlIdx = parseInt(qualityValue, 10);
+        // If qualityValue was passed as a height like '720p' or '720' from default qualities or fallback:
+        if (isNaN(lvlIdx) || lvlIdx > 20) {
+          const heightNum = parseInt(qualityValue.replace(/\D/g, ''), 10);
+          const foundIndex = hls.levels.findIndex(l => l.height === heightNum);
+          if (foundIndex !== -1) {
+            lvlIdx = foundIndex;
+          } else {
+            // Find closest level by height
+            let closestIdx = 0;
+            let minDiff = Infinity;
+            hls.levels.forEach((l, idx) => {
+              const diff = Math.abs((l.height || 0) - heightNum);
+              if (diff < minDiff) {
+                minDiff = diff;
+                closestIdx = idx;
+              }
+            });
+            lvlIdx = closestIdx;
+          }
+        }
+
+        if (!isNaN(lvlIdx) && lvlIdx >= 0 && lvlIdx < hls.levels.length) {
+          // 1. Set level immediately across all Hls pointers
+          hls.currentLevel = lvlIdx;
+          hls.loadLevel = lvlIdx;
+          hls.nextLevel = lvlIdx;
+          
+          setSelectedQuality(displayLabel);
+          const targetHeight = hls.levels[lvlIdx]?.height;
+          if (targetHeight) {
+            setActiveHeight(targetHeight);
+          }
+          showQualityNotification(`Qualidade alterada: ${displayLabel}`);
+
+          // 2. IMMEDIATE VISIBLE SWITCH:
+          // In standard Hls.js, the player would continue playing whatever was already in buffer (30-60s).
+          // To make the resolution change take effect immediately on screen:
+          if (video) {
+            const curTime = video.currentTime;
+            const wasPlaying = !video.paused;
+
+            // Show buffering feedback
+            setIsBuffering(true);
+
+            // Re-assigning currentTime forces Hls.js to flush forward buffer and reload at new resolution:
+            video.currentTime = curTime;
+            if (wasPlaying) {
+              video.play().catch(() => {});
+            }
+          }
         }
       }
       return;
     }
 
+    // Direct MP4 / non-HLS video fallback:
+    setSelectedQuality(displayLabel);
     const video = videoRef.current;
     if (!video) return;
 
-    // If the video URL has quality parameters, apply cleanly while preserving playback position
     if (url.includes('quality=') || url.includes('rendition=') || url.includes('res=')) {
       const currentPos = video.currentTime;
       const wasPlaying = !video.paused;
@@ -490,6 +630,10 @@ export default function CustomDirectVideoPlayer({
       video.src = updatedUrl;
       video.currentTime = currentPos;
       if (wasPlaying) video.play().catch(() => {});
+      showQualityNotification(`Qualidade: ${displayLabel}`);
+    } else {
+      const res = nativeResolution || (video.videoHeight ? `${video.videoHeight}p` : 'Original');
+      showQualityNotification(`Resolução Original: ${res}`);
     }
   };
 
@@ -529,49 +673,85 @@ export default function CustomDirectVideoPlayer({
       // Enter fullscreen mode
       let success = false;
 
-      // 1. Try standard container fullscreen (Android Chrome, iPad, Desktop)
-      try {
-        if (container.requestFullscreen) {
-          await container.requestFullscreen();
+      // 1. iPhone / iPod / iOS Mobile Safari:
+      // On iPhone, standard HTML <div> elements cannot enter fullscreen via requestFullscreen.
+      // Calling webkitEnterFullscreen directly on HTMLVideoElement is the native iOS way.
+      const isIPhone = typeof navigator !== 'undefined' && (
+        /iPhone|iPod/.test(navigator.userAgent) || 
+        (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1 && window.screen.width < 768)
+      );
+
+      if (isIPhone && video && typeof (video as any).webkitEnterFullscreen === 'function') {
+        try {
+          (video as any).webkitEnterFullscreen();
           success = true;
-        } else if ((container as any).webkitRequestFullscreen) {
-          (container as any).webkitRequestFullscreen();
-          success = true;
-        } else if ((container as any).mozRequestFullScreen) {
-          (container as any).mozRequestFullScreen();
-          success = true;
-        } else if ((container as any).msRequestFullscreen) {
-          (container as any).msRequestFullscreen();
-          success = true;
+          setIsFullscreen(true);
+          return;
+        } catch (err) {
+          console.warn('iOS webkitEnterFullscreen failed:', err);
         }
-      } catch (err) {
-        console.warn('Container requestFullscreen failed:', err);
       }
 
-      // 2. On iPhone iOS Safari or mobile browsers where container fullscreen is not allowed on <div> elements,
-      // call webkitEnterFullscreen directly on the <video> element
+      // 2. Try standard container fullscreen (Android Chrome, iPad, Desktop)
+      if (!success && container.requestFullscreen) {
+        try {
+          await container.requestFullscreen();
+          success = true;
+          setIsFullscreen(true);
+        } catch (err) {
+          console.warn('Container requestFullscreen failed:', err);
+        }
+      }
+
+      // 3. Try container webkitRequestFullscreen (WebKit desktop or non-iPhone)
+      if (!success && !isIPhone && (container as any).webkitRequestFullscreen) {
+        try {
+          (container as any).webkitRequestFullscreen();
+          success = true;
+          setIsFullscreen(true);
+        } catch (err) {
+          console.warn('Container webkitRequestFullscreen failed:', err);
+        }
+      }
+
+      // 4. Try video element directly (in case container is rejected by browser policy)
       if (!success && video) {
         try {
-          if ((video as any).webkitEnterFullscreen) {
-            (video as any).webkitEnterFullscreen();
-            success = true;
-          } else if (video.requestFullscreen) {
+          if (video.requestFullscreen) {
             await video.requestFullscreen();
             success = true;
+            setIsFullscreen(true);
           } else if ((video as any).webkitRequestFullscreen) {
             (video as any).webkitRequestFullscreen();
             success = true;
+            setIsFullscreen(true);
+          } else if (typeof (video as any).webkitEnterFullscreen === 'function') {
+            (video as any).webkitEnterFullscreen();
+            success = true;
+            setIsFullscreen(true);
           }
         } catch (err) {
           console.warn('Video element fullscreen failed:', err);
         }
       }
 
-      // 3. Fallback: If native fullscreen is blocked (e.g. within restricted iframe or PWA policy), activate simulated fullscreen
+      // 5. Portaled Simulated Fullscreen Fallback:
+      // If native fullscreen is blocked (e.g. within restricted iframe or PWA policy),
+      // activate Portaled Simulated Fullscreen which portals directly onto document.body.
       if (!success) {
+        const wasPlaying = video && !video.paused;
+        const currTime = video ? video.currentTime : 0;
         setIsSimulatedFullscreen(true);
         setIsFullscreen(true);
         document.body.style.overflow = 'hidden';
+        setTimeout(() => {
+          if (videoRef.current) {
+            videoRef.current.currentTime = currTime;
+            if (wasPlaying) {
+              videoRef.current.play().catch(() => {});
+            }
+          }
+        }, 50);
       }
     }
 
@@ -598,18 +778,40 @@ export default function CustomDirectVideoPlayer({
   }
 
   const qualityList = hlsLevels.length > 0
-    ? [{ label: 'Auto', value: 'auto' }, ...hlsLevels]
-    : DEFAULT_QUALITIES;
+    ? [
+        { 
+          label: activeHeight ? `Automática (${activeHeight}p)` : 'Automática (Recomendada)', 
+          shortLabel: activeHeight ? `Auto (${activeHeight}p)` : 'Auto', 
+          value: 'auto' 
+        }, 
+        ...hlsLevels
+      ]
+    : [
+        { 
+          label: nativeResolution ? `Original (${nativeResolution})` : 'Qualidade Original (Máxima)', 
+          shortLabel: nativeResolution || 'Original', 
+          value: 'auto' 
+        },
+        { label: '1080p (Full HD)', shortLabel: '1080p', value: '1080p' },
+        { label: '720p (HD)', shortLabel: '720p', value: '720p' },
+        { label: '480p (SD)', shortLabel: '480p', value: '480p' },
+        { label: '360p (Low)', shortLabel: '360p', value: '360p' },
+      ];
 
-  const currentQualityDisplay = selectedQuality === 'auto' ? 'Auto' : selectedQuality;
+  let currentQualityDisplay = 'Auto';
+  if (selectedQuality === 'auto') {
+    currentQualityDisplay = activeHeight ? `Auto (${activeHeight}p)` : 'Auto';
+  } else {
+    currentQualityDisplay = selectedQuality;
+  }
 
-  return (
+  const playerContent = (
     <div
       ref={containerRef}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       className={`group relative w-full h-full bg-black select-none overflow-hidden flex items-center justify-center font-sans ${
-        isSimulatedFullscreen ? 'fixed inset-0 z-[99999] w-screen h-screen' : ''
+        isSimulatedFullscreen ? 'fixed inset-0 z-[9999999] w-screen h-screen' : ''
       }`}
     >
       {/* HTML5 Native Video Tag */}
@@ -619,9 +821,41 @@ export default function CustomDirectVideoPlayer({
         playsInline
         webkit-playsinline="true"
         preload="metadata"
-        onClick={togglePlay}
+        onClick={handleVideoClick}
         className="w-full h-full object-contain cursor-pointer"
       />
+
+      {/* On-Screen Quality Change Notification Toast */}
+      <AnimatePresence>
+        {qualityNotification && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.9 }}
+            transition={{ duration: 0.2 }}
+            className="absolute top-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-2xl bg-black/85 backdrop-blur-xl border border-white/20 shadow-2xl flex items-center gap-2.5 text-white pointer-events-none"
+          >
+            <Settings size={15} className="text-primary animate-spin" style={{ animationDuration: '4s' }} />
+            <span className="text-xs font-semibold tracking-wide">{qualityNotification}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Exit Fullscreen button on top right when in simulated fullscreen */}
+      {isSimulatedFullscreen && (
+        <button
+          type="button"
+          onClick={toggleFullscreen}
+          className={`absolute top-4 right-4 z-50 px-3.5 py-2 rounded-xl bg-black/80 hover:bg-black/95 border border-white/25 text-white text-xs font-semibold flex items-center gap-2 shadow-2xl backdrop-blur-md cursor-pointer active:scale-95 transition-opacity duration-300 ${
+            showControls ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+          }`}
+          title="Exit Fullscreen"
+          aria-label="Exit Fullscreen"
+        >
+          <X size={18} />
+          <span className="hidden xs:inline">Exit</span>
+        </button>
+      )}
 
       {/* Loading / Buffering Spinner Overlay with Glow */}
       <AnimatePresence>
@@ -738,22 +972,82 @@ export default function CustomDirectVideoPlayer({
               {isPlaying ? <Pause size={20} className="fill-white" /> : <Play size={20} className="fill-white" />}
             </button>
 
-            {/* Rewind 10s */}
+            {/* Desktop Rewind 10s */}
             <button
               type="button"
               onClick={() => seekRelative(-10)}
-              className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition-all cursor-pointer active:scale-90"
+              className="hidden sm:flex p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition-all cursor-pointer active:scale-90"
               title="Rewind 10 seconds"
               aria-label="Rewind 10 seconds"
             >
               <Rewind10Icon className="w-5 h-5 text-white/90" />
             </button>
 
+            {/* Mobile Video Quality Selector with Settings / Gear icon */}
+            <div className="relative sm:hidden" ref={mobileQualityMenuRef}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowQualityMenu(!showQualityMenu);
+                  setShowSpeedMenu(false);
+                  resetControlsTimer();
+                }}
+                className="group/btn px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-xs font-bold text-white transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                title="Qualidade do vídeo"
+                aria-label="Qualidade do vídeo"
+              >
+                <Settings size={14} className="text-primary flex-shrink-0 group-hover/btn:rotate-45 transition-transform duration-300" />
+                <span className="text-[11px] font-semibold">{currentQualityDisplay}</span>
+              </button>
+
+              <AnimatePresence>
+                {showQualityMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute bottom-full left-0 mb-2.5 py-1.5 w-48 rounded-2xl bg-zinc-900/98 border border-white/20 backdrop-blur-2xl shadow-[0_10px_35px_rgba(0,0,0,0.8)] z-50 flex flex-col max-h-56 overflow-y-auto"
+                  >
+                    <div className="px-3 py-1.5 text-[10px] uppercase font-bold text-white/50 tracking-wider border-b border-white/10 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Settings size={11} className="text-primary" />
+                        <span>Qualidade</span>
+                      </span>
+                      <span className="text-primary font-mono text-[9px] font-bold px-1.5 py-0.5 bg-primary/10 rounded">HD</span>
+                    </div>
+                    {qualityList.map((q) => {
+                      const isSelected = selectedQuality === 'auto' 
+                        ? q.value === 'auto' 
+                        : (selectedQuality === q.shortLabel || selectedQuality === q.label || selectedQuality === q.value);
+                      return (
+                        <button
+                          key={q.value}
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleQualitySelect(q.value, q.label, q.shortLabel);
+                          }}
+                          className={`px-3 py-2 text-xs text-left font-medium transition-colors hover:bg-white/10 flex items-center justify-between cursor-pointer ${
+                            isSelected ? 'text-primary font-bold bg-primary/15' : 'text-white/80'
+                          }`}
+                        >
+                          <span className="truncate">{q.label}</span>
+                          {isSelected && <Check size={14} className="text-primary flex-shrink-0" />}
+                        </button>
+                      );
+                    })}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
             {/* Forward 10s */}
             <button
               type="button"
               onClick={() => seekRelative(10)}
-              className="p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition-all cursor-pointer active:scale-90"
+              className="hidden xs:flex p-2 rounded-xl text-white/80 hover:text-white hover:bg-white/10 transition-all cursor-pointer active:scale-90"
               title="Forward 10 seconds"
               aria-label="Forward 10 seconds"
             >
@@ -795,12 +1089,14 @@ export default function CustomDirectVideoPlayer({
           <div className="flex items-center gap-1 sm:gap-2">
             
             {/* Speed Selector Menu */}
-            <div className="relative">
+            <div className="relative" ref={speedMenuRef}>
               <button
                 type="button"
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   setShowSpeedMenu(!showSpeedMenu);
                   setShowQualityMenu(false);
+                  resetControlsTimer();
                 }}
                 className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-xs font-bold text-white transition-all cursor-pointer active:scale-95"
                 title="Playback speed"
@@ -825,7 +1121,7 @@ export default function CustomDirectVideoPlayer({
                         key={rate}
                         type="button"
                         onClick={() => handleSpeedSelect(rate)}
-                        className={`px-3 py-1.5 text-xs text-left font-medium transition-colors hover:bg-white/10 flex items-center justify-between ${
+                        className={`px-3 py-1.5 text-xs text-left font-medium transition-colors hover:bg-white/10 flex items-center justify-between cursor-pointer ${
                           playbackRate === rate ? 'text-primary font-bold bg-primary/10' : 'text-white/80'
                         }`}
                       >
@@ -838,21 +1134,22 @@ export default function CustomDirectVideoPlayer({
               </AnimatePresence>
             </div>
 
-            {/* Video Quality Selector */}
-            <div className="relative">
+            {/* Desktop Video Quality Selector with Settings / Gear icon */}
+            <div className="relative hidden sm:block" ref={qualityMenuRef}>
               <button
                 type="button"
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   setShowQualityMenu(!showQualityMenu);
                   setShowSpeedMenu(false);
                   resetControlsTimer();
                 }}
-                className="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-xs font-bold text-white transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
-                title="Video quality"
-                aria-label="Video quality"
+                className="group/btn px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-xs font-bold text-white transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
+                title="Qualidade do vídeo"
+                aria-label="Qualidade do vídeo"
               >
-                <Sliders size={13} className="text-primary" />
-                <span className="text-[11px] font-semibold">{currentQualityDisplay}</span>
+                <Settings size={15} className="text-primary group-hover/btn:rotate-45 transition-transform duration-300 flex-shrink-0" />
+                <span className="text-xs font-semibold">{currentQualityDisplay}</span>
               </button>
 
               <AnimatePresence>
@@ -862,25 +1159,33 @@ export default function CustomDirectVideoPlayer({
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 8, scale: 0.95 }}
                     transition={{ duration: 0.15 }}
-                    className="absolute bottom-full right-0 mb-2 py-1.5 w-40 rounded-2xl bg-zinc-900/95 border border-white/15 backdrop-blur-xl shadow-2xl z-50 flex flex-col max-h-56 overflow-y-auto"
+                    className="absolute bottom-full right-0 mb-2.5 py-1.5 w-52 rounded-2xl bg-zinc-900/98 border border-white/20 backdrop-blur-2xl shadow-[0_10px_35px_rgba(0,0,0,0.8)] z-50 flex flex-col max-h-64 overflow-y-auto"
                   >
-                    <div className="px-3 py-1 text-[10px] uppercase font-bold text-white/40 tracking-wider border-b border-white/5 flex items-center justify-between">
-                      <span>Quality</span>
-                      <span className="text-primary font-mono text-[9px] font-bold">HD</span>
+                    <div className="px-3 py-1.5 text-[10px] uppercase font-bold text-white/50 tracking-wider border-b border-white/10 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Settings size={12} className="text-primary" />
+                        <span>Qualidade de Vídeo</span>
+                      </span>
+                      <span className="text-primary font-mono text-[9px] font-bold px-1.5 py-0.5 bg-primary/10 rounded">HD</span>
                     </div>
                     {qualityList.map((q) => {
-                      const isSelected = selectedQuality === q.value || selectedQuality === q.label;
+                      const isSelected = selectedQuality === 'auto' 
+                        ? q.value === 'auto' 
+                        : (selectedQuality === q.shortLabel || selectedQuality === q.label || selectedQuality === q.value);
                       return (
                         <button
                           key={q.value}
                           type="button"
-                          onClick={() => handleQualitySelect(q.value, q.label)}
-                          className={`px-3 py-1.5 text-xs text-left font-medium transition-colors hover:bg-white/10 flex items-center justify-between ${
-                            isSelected ? 'text-primary font-bold bg-primary/10' : 'text-white/80'
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleQualitySelect(q.value, q.label, q.shortLabel);
+                          }}
+                          className={`px-3 py-2 text-xs text-left font-medium transition-colors hover:bg-white/10 flex items-center justify-between cursor-pointer ${
+                            isSelected ? 'text-primary font-bold bg-primary/15' : 'text-white/80'
                           }`}
                         >
                           <span className="truncate">{q.label}</span>
-                          {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
+                          {isSelected && <Check size={14} className="text-primary flex-shrink-0" />}
                         </button>
                       );
                     })}
@@ -906,4 +1211,10 @@ export default function CustomDirectVideoPlayer({
       </div>
     </div>
   );
+
+  if (isSimulatedFullscreen && typeof document !== 'undefined') {
+    return createPortal(playerContent, document.body);
+  }
+
+  return playerContent;
 }
