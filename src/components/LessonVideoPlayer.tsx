@@ -1,9 +1,6 @@
-import React, { Suspense, lazy } from 'react';
-import { Loader2 } from 'lucide-react';
+import React from 'react';
 import CustomDirectVideoPlayer from './CustomDirectVideoPlayer';
-import { getCloudflareStreamEmbedUrl, isCloudflareStreamUrl, isDirectVideoUrl } from '../utils/videoUtils';
-
-const LazyReactPlayer: any = lazy(() => import('react-player'));
+import { cleanVideoUrl } from '../utils/videoUtils';
 
 interface LessonVideoPlayerProps {
   url: string;
@@ -14,15 +11,17 @@ interface LessonVideoPlayerProps {
 export default function LessonVideoPlayer({ url, title, onEnded }: LessonVideoPlayerProps) {
   if (!url || url === 'undefined') return null;
 
+  const cleanUrl = cleanVideoUrl(url);
+
   let content: React.ReactNode = null;
 
   // 1. YouTube (Native zero-bundle iframe)
-  if (url.includes('youtube.com') || url.includes('youtu.be')) {
+  if (cleanUrl.includes('youtube.com') || cleanUrl.includes('youtu.be')) {
     let videoId = '';
-    if (url.includes('v=')) videoId = url.split('v=')[1]?.split('&')[0] || '';
-    else if (url.includes('youtu.be/')) videoId = url.split('youtu.be/')[1]?.split('?')[0] || '';
-    else if (url.includes('youtube.com/shorts/')) videoId = url.split('youtube.com/shorts/')[1]?.split('?')[0] || '';
-    else if (url.includes('embed/')) videoId = url.split('embed/')[1]?.split('?')[0] || '';
+    if (cleanUrl.includes('v=')) videoId = cleanUrl.split('v=')[1]?.split('&')[0] || '';
+    else if (cleanUrl.includes('youtu.be/')) videoId = cleanUrl.split('youtu.be/')[1]?.split('?')[0] || '';
+    else if (cleanUrl.includes('youtube.com/shorts/')) videoId = cleanUrl.split('youtube.com/shorts/')[1]?.split('?')[0] || '';
+    else if (cleanUrl.includes('embed/')) videoId = cleanUrl.split('embed/')[1]?.split('?')[0] || '';
 
     if (videoId) {
       content = (
@@ -37,8 +36,8 @@ export default function LessonVideoPlayer({ url, title, onEnded }: LessonVideoPl
     }
   }
   // 2. Vimeo (Native zero-bundle iframe)
-  else if (url.includes('vimeo.com')) {
-    const videoId = url.split('vimeo.com/')[1]?.split('?')[0];
+  else if (cleanUrl.includes('vimeo.com')) {
+    const videoId = cleanUrl.split('vimeo.com/')[1]?.split('?')[0];
     if (videoId) {
       content = (
         <iframe
@@ -52,11 +51,11 @@ export default function LessonVideoPlayer({ url, title, onEnded }: LessonVideoPl
     }
   }
   // 3. Google Drive (Native zero-bundle iframe)
-  else if (url.includes('drive.google.com')) {
+  else if (cleanUrl.includes('drive.google.com')) {
     let videoId = '';
-    if (url.includes('/d/')) videoId = url.split('/d/')[1]?.split('/')[0] || '';
-    else if (url.includes('id=')) videoId = url.split('id=')[1]?.split('&')[0] || '';
-    else if (url.includes('/file/d/')) videoId = url.split('/file/d/')[1]?.split('/')[0] || '';
+    if (cleanUrl.includes('/d/')) videoId = cleanUrl.split('/d/')[1]?.split('/')[0] || '';
+    else if (cleanUrl.includes('id=')) videoId = cleanUrl.split('id=')[1]?.split('&')[0] || '';
+    else if (cleanUrl.includes('/file/d/')) videoId = cleanUrl.split('/file/d/')[1]?.split('/')[0] || '';
 
     if (videoId) {
       content = (
@@ -71,12 +70,12 @@ export default function LessonVideoPlayer({ url, title, onEnded }: LessonVideoPl
     }
   }
   // 4. OneDrive Support (Native iframe)
-  else if (url.includes('onedrive.live.com') || url.includes('1drv.ms')) {
-    let embedUrl = url;
-    if (url.includes('1drv.ms')) {
-      embedUrl = url.replace('redir', 'embed').replace('view.aspx', 'embed.aspx');
-    } else if (url.includes('onedrive.live.com') && !url.includes('embed')) {
-      embedUrl = url.replace('view.aspx', 'embed.aspx').replace('redir', 'embed');
+  else if (cleanUrl.includes('onedrive.live.com') || cleanUrl.includes('1drv.ms')) {
+    let embedUrl = cleanUrl;
+    if (cleanUrl.includes('1drv.ms')) {
+      embedUrl = cleanUrl.replace('redir', 'embed').replace('view.aspx', 'embed.aspx');
+    } else if (cleanUrl.includes('onedrive.live.com') && !cleanUrl.includes('embed')) {
+      embedUrl = cleanUrl.replace('view.aspx', 'embed.aspx').replace('redir', 'embed');
     }
 
     if (embedUrl.includes('?')) {
@@ -98,51 +97,15 @@ export default function LessonVideoPlayer({ url, title, onEnded }: LessonVideoPl
       />
     );
   }
-  // 5. Cloudflare Stream, Cloudflare R2, or native HTML5 video (mp4, webm, mov, ogg, m3u8, etc.)
-  else if (
-    isCloudflareStreamUrl(url) ||
-    url.includes('r2.dev') || 
-    url.includes('cloudflare') || 
-    isDirectVideoUrl(url)
-  ) {
+  // 5. Cloudflare Stream, Cloudflare R2, Supabase Storage, and native HTML5 / HLS video player
+  else {
     content = (
       <CustomDirectVideoPlayer
-        url={url}
+        url={cleanUrl}
         title={title}
         onEnded={onEnded}
         autoPlay={true}
       />
-    );
-  }
-  // 6. Generic Fallback: Dynamic ReactPlayer loaded strictly on-demand
-  else {
-    content = (
-      <Suspense fallback={
-        <div className="w-full h-full flex items-center justify-center bg-black">
-          <Loader2 className="w-8 h-8 animate-spin text-white/40" />
-        </div>
-      }>
-        <LazyReactPlayer 
-          key={url}
-          url={url} 
-          width="100%" 
-          height="100%" 
-          style={{ position: 'absolute', top: 0, left: 0 }}
-          controls 
-          playing
-          playsinline
-          config={{
-            file: {
-              attributes: {
-                preload: 'metadata',
-                playsInline: true,
-                'webkit-playsinline': 'true'
-              }
-            }
-          } as any}
-          onEnded={onEnded}
-        />
-      </Suspense>
     );
   }
 

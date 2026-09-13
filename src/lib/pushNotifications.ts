@@ -176,17 +176,21 @@ export async function setupPushInBackground(
 
         // 2. Save token to Supabase push_tokens table
         try {
-          const { error: upsertErr } = await supabase.from('push_tokens').upsert({
-            user_id: userId,
+          const payload: Record<string, any> = {
             token: token,
             platform: 'web',
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'token' });
+          };
+          // Only attach user_id if valid UUID format to avoid PostgREST 400
+          if (userId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+            payload.user_id = userId;
+          }
+
+          const { error: upsertErr } = await supabase.from('push_tokens').upsert(payload, { onConflict: 'token' });
 
           if (!upsertErr) {
             console.log('[Push] FCM token saved to Supabase');
           } else {
-            console.warn('[Push] Supabase push_token upsert warning:', upsertErr.message);
+            console.warn('[Push] Supabase push_token upsert notice:', upsertErr.message);
           }
         } catch (dbErr) {
           console.warn('[Push] Push token db error:', dbErr);

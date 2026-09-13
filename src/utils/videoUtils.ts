@@ -93,12 +93,23 @@ export function isCloudflareStreamUrl(url: string): boolean {
   );
 }
 
+export function cleanVideoUrl(rawUrl: string): string {
+  if (!rawUrl) return '';
+  const trimmed = rawUrl.trim();
+  const iframeMatch = trimmed.match(/src=["']([^"']+)["']/i);
+  if (iframeMatch && iframeMatch[1]) {
+    return iframeMatch[1].trim();
+  }
+  return trimmed;
+}
+
 export function isDirectVideoUrl(url: string): boolean {
   if (!url) return false;
   return (
     url.includes('r2.dev') ||
     url.includes('cloudflare') ||
     url.includes('.m3u8') ||
+    url.includes('supabase.co/storage') ||
     /\.(mp4|webm|ogg|mov|m4v)(\?.*)?$/i.test(url)
   );
 }

@@ -15,7 +15,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import Hls from 'hls.js';
 import { GlowingSpinner } from './GlowingSpinner';
-import { getCloudflareHlsUrl, getCloudflareStreamEmbedUrl, isCloudflareStreamUrl } from '../utils/videoUtils';
+import { getCloudflareHlsUrl, getCloudflareStreamEmbedUrl, isCloudflareStreamUrl, cleanVideoUrl } from '../utils/videoUtils';
 
 interface CustomDirectVideoPlayerProps {
   url: string;
@@ -185,6 +185,7 @@ export default function CustomDirectVideoPlayer({
   // Initialize media source: HLS for Cloudflare Stream & .m3u8, or native HTML5 for direct video
   useEffect(() => {
     setUseIframeFallback(false);
+    setIsLoading(true);
     const video = videoRef.current;
     if (!video) return;
 
@@ -193,9 +194,20 @@ export default function CustomDirectVideoPlayer({
       hlsRef.current = null;
     }
 
-    const hlsUrl = getCloudflareHlsUrl(url);
-    const effectiveUrl = hlsUrl || url;
+    const cleanedUrl = cleanVideoUrl(url);
+    const hlsUrl = getCloudflareHlsUrl(cleanedUrl);
+    const effectiveUrl = hlsUrl || cleanedUrl;
     const isHls = effectiveUrl.includes('.m3u8') || effectiveUrl.includes('/manifest');
+
+    // If it's explicitly an iframe URL already
+    if (!hlsUrl && (cleanedUrl.includes('/iframe') || cleanedUrl.includes('iframe.videodelivery.net'))) {
+      setUseIframeFallback(true);
+      setIsLoading(false);
+      return;
+    }
+
+    let networkRetries = 0;
+    let mediaRetries = 0;
 
     if (isHls && Hls.isSupported()) {
       const hls = new Hls({
@@ -216,7 +228,7 @@ export default function CustomDirectVideoPlayer({
         if (data.levels && data.levels.length > 0) {
           const parsed = data.levels.map((lvl, index) => {
             const h = lvl.height || (lvl as any).attrs?.RESOLUTION?.height || 0;
-            let label = h ? `${h}p` : `Qualidade ${index + 1}`;
+            let label = h ? `${h}p` : `Quality ${index + 1}`;
             if (h >= 1080) label += ' (Full HD)';
             else if (h >= 720) label += ' (HD)';
             else if (h >= 480) label += ' (SD)';
@@ -233,7 +245,11 @@ export default function CustomDirectVideoPlayer({
           setHlsLevels(parsed);
         }
         if (autoPlay) {
-          video.play().catch(() => {});
+          video.play().catch((err) => {
+            console.log('[Player] Autoplay prevented by browser, click play to start:', err?.message);
+            setIsPlaying(false);
+            setIsLoading(false);
+          });
         }
       });
 
@@ -250,22 +266,55 @@ export default function CustomDirectVideoPlayer({
       });
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
+        console.warn('[Player] HLS event error:', data.type, data.details, data.response?.code);
         if (data.fatal) {
           switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              console.warn('HLS Network Error, attempting load recovery...', data);
-              hls.startLoad();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              console.warn('HLS Media Error, attempting media recovery...', data);
-              hls.recoverMediaError();
-              break;
-            default:
-              console.warn('Fatal HLS error, switching to Cloudflare iframe fallback:', data);
-              if (isCloudflareStreamUrl(url)) {
+            case Hls.ErrorTypes.NETWORK_ERROR: {
+              networkRetries++;
+              const statusCode = data.response?.code || 0;
+              const isBlocked = statusCode === 401 || statusCode === 403 || statusCode === 0;
+
+              // If origin blocked (CORS / Cloudflare Stream token / Vercel domain restriction):
+              if ((isBlocked || networkRetries > 1) && (isCloudflareStreamUrl(cleanedUrl) || getCloudflareStreamEmbedUrl(cleanedUrl))) {
+                console.warn('[Player] HLS stream blocked by origin/CORS or private token. Activating Cloudflare iframe player fallback...');
                 setUseIframeFallback(true);
+                setIsLoading(false);
+                setIsBuffering(false);
+              } else if (networkRetries <= 2) {
+                console.warn('[Player] Retrying HLS stream load...');
+                hls.startLoad();
+              } else {
+                setIsLoading(false);
+                setIsBuffering(false);
               }
               break;
+            }
+            case Hls.ErrorTypes.MEDIA_ERROR: {
+              mediaRetries++;
+              if (mediaRetries <= 2) {
+                hls.recoverMediaError();
+              } else if (isCloudflareStreamUrl(cleanedUrl) || getCloudflareStreamEmbedUrl(cleanedUrl)) {
+                setUseIframeFallback(true);
+                setIsLoading(false);
+                setIsBuffering(false);
+              } else {
+                setIsLoading(false);
+                setIsBuffering(false);
+              }
+              break;
+            }
+            default: {
+              console.warn('[Player] Fatal HLS error:', data);
+              if (isCloudflareStreamUrl(cleanedUrl) || getCloudflareStreamEmbedUrl(cleanedUrl)) {
+                setUseIframeFallback(true);
+                setIsLoading(false);
+                setIsBuffering(false);
+              } else {
+                setIsLoading(false);
+                setIsBuffering(false);
+              }
+              break;
+            }
           }
         }
       });
@@ -273,13 +322,21 @@ export default function CustomDirectVideoPlayer({
       // Native Apple Safari HLS playback
       video.src = effectiveUrl;
       if (autoPlay) {
-        video.play().catch(() => {});
+        video.play().catch((err) => {
+          console.log('[Player] Autoplay prevented by browser, click play to start:', err?.message);
+          setIsPlaying(false);
+          setIsLoading(false);
+        });
       }
     } else {
-      // Direct MP4, WebM, Cloudflare R2, etc.
+      // Direct MP4, WebM, Cloudflare R2, Supabase Storage, etc.
       video.src = effectiveUrl;
       if (autoPlay) {
-        video.play().catch(() => {});
+        video.play().catch((err) => {
+          console.log('[Player] Autoplay prevented by browser, click play to start:', err?.message);
+          setIsPlaying(false);
+          setIsLoading(false);
+        });
       }
     }
 
@@ -331,6 +388,16 @@ export default function CustomDirectVideoPlayer({
       setIsPlaying(false);
       if (onEnded) onEnded();
     };
+    const handleVideoError = () => {
+      console.warn('[Player] Video element error:', video.error);
+      setIsLoading(false);
+      setIsBuffering(false);
+      const cleaned = cleanVideoUrl(url);
+      if (isCloudflareStreamUrl(cleaned) || getCloudflareStreamEmbedUrl(cleaned)) {
+        console.warn('[Player] Video tag error on Cloudflare stream. Falling back to iframe embed...');
+        setUseIframeFallback(true);
+      }
+    };
 
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
     video.addEventListener('timeupdate', handleTimeUpdate);
@@ -340,6 +407,7 @@ export default function CustomDirectVideoPlayer({
     video.addEventListener('playing', handlePlaying);
     video.addEventListener('canplay', handleCanPlay);
     video.addEventListener('ended', handleEnded);
+    video.addEventListener('error', handleVideoError);
 
     return () => {
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
@@ -350,8 +418,9 @@ export default function CustomDirectVideoPlayer({
       video.removeEventListener('playing', handlePlaying);
       video.removeEventListener('canplay', handleCanPlay);
       video.removeEventListener('ended', handleEnded);
+      video.removeEventListener('error', handleVideoError);
     };
-  }, [isScrubbing, onEnded]);
+  }, [url, isScrubbing, onEnded]);
 
   // Fullscreen change listener supporting all engines and mobile browsers (iOS/WebKit)
   useEffect(() => {
@@ -560,7 +629,7 @@ export default function CustomDirectVideoPlayer({
         hls.loadLevel = -1;
         hls.nextLevel = -1;
         setSelectedQuality('auto');
-        showQualityNotification('Qualidade: Automática');
+        showQualityNotification('Quality: Auto');
       } else {
         let lvlIdx = parseInt(qualityValue, 10);
         // If qualityValue was passed as a height like '720p' or '720' from default qualities or fallback:
@@ -595,7 +664,7 @@ export default function CustomDirectVideoPlayer({
           if (targetHeight) {
             setActiveHeight(targetHeight);
           }
-          showQualityNotification(`Qualidade alterada: ${displayLabel}`);
+          showQualityNotification(`Quality changed: ${displayLabel}`);
 
           // 2. IMMEDIATE VISIBLE SWITCH:
           // In standard Hls.js, the player would continue playing whatever was already in buffer (30-60s).
@@ -630,10 +699,10 @@ export default function CustomDirectVideoPlayer({
       video.src = updatedUrl;
       video.currentTime = currentPos;
       if (wasPlaying) video.play().catch(() => {});
-      showQualityNotification(`Qualidade: ${displayLabel}`);
+      showQualityNotification(`Quality: ${displayLabel}`);
     } else {
       const res = nativeResolution || (video.videoHeight ? `${video.videoHeight}p` : 'Original');
-      showQualityNotification(`Resolução Original: ${res}`);
+      showQualityNotification(`Original Resolution: ${res}`);
     }
   };
 
@@ -763,7 +832,8 @@ export default function CustomDirectVideoPlayer({
 
   // If iframe fallback is triggered for Cloudflare Stream
   if (useIframeFallback) {
-    const embedUrl = getCloudflareStreamEmbedUrl(url) || url;
+    const cleaned = cleanVideoUrl(url);
+    const embedUrl = getCloudflareStreamEmbedUrl(cleaned) || cleaned;
     return (
       <div className="relative w-full h-full bg-black flex items-center justify-center overflow-hidden">
         <iframe
@@ -780,7 +850,7 @@ export default function CustomDirectVideoPlayer({
   const qualityList = hlsLevels.length > 0
     ? [
         { 
-          label: activeHeight ? `Automática (${activeHeight}p)` : 'Automática (Recomendada)', 
+          label: activeHeight ? `Auto (${activeHeight}p)` : 'Auto (Recommended)', 
           shortLabel: activeHeight ? `Auto (${activeHeight}p)` : 'Auto', 
           value: 'auto' 
         }, 
@@ -788,7 +858,7 @@ export default function CustomDirectVideoPlayer({
       ]
     : [
         { 
-          label: nativeResolution ? `Original (${nativeResolution})` : 'Qualidade Original (Máxima)', 
+          label: nativeResolution ? `Original (${nativeResolution})` : 'Original Quality (Max)', 
           shortLabel: nativeResolution || 'Original', 
           value: 'auto' 
         },
@@ -994,8 +1064,8 @@ export default function CustomDirectVideoPlayer({
                   resetControlsTimer();
                 }}
                 className="group/btn px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-xs font-bold text-white transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
-                title="Qualidade do vídeo"
-                aria-label="Qualidade do vídeo"
+                title="Video quality"
+                aria-label="Video quality"
               >
                 <Settings size={14} className="text-primary flex-shrink-0 group-hover/btn:rotate-45 transition-transform duration-300" />
                 <span className="text-[11px] font-semibold">{currentQualityDisplay}</span>
@@ -1013,7 +1083,7 @@ export default function CustomDirectVideoPlayer({
                     <div className="px-3 py-1.5 text-[10px] uppercase font-bold text-white/50 tracking-wider border-b border-white/10 flex items-center justify-between">
                       <span className="flex items-center gap-1.5">
                         <Settings size={11} className="text-primary" />
-                        <span>Qualidade</span>
+                        <span>Quality</span>
                       </span>
                       <span className="text-primary font-mono text-[9px] font-bold px-1.5 py-0.5 bg-primary/10 rounded">HD</span>
                     </div>
@@ -1145,8 +1215,8 @@ export default function CustomDirectVideoPlayer({
                   resetControlsTimer();
                 }}
                 className="group/btn px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-xs font-bold text-white transition-all cursor-pointer active:scale-95 flex items-center gap-1.5"
-                title="Qualidade do vídeo"
-                aria-label="Qualidade do vídeo"
+                title="Video quality"
+                aria-label="Video quality"
               >
                 <Settings size={15} className="text-primary group-hover/btn:rotate-45 transition-transform duration-300 flex-shrink-0" />
                 <span className="text-xs font-semibold">{currentQualityDisplay}</span>
@@ -1164,7 +1234,7 @@ export default function CustomDirectVideoPlayer({
                     <div className="px-3 py-1.5 text-[10px] uppercase font-bold text-white/50 tracking-wider border-b border-white/10 flex items-center justify-between">
                       <span className="flex items-center gap-1.5">
                         <Settings size={12} className="text-primary" />
-                        <span>Qualidade de Vídeo</span>
+                        <span>Video Quality</span>
                       </span>
                       <span className="text-primary font-mono text-[9px] font-bold px-1.5 py-0.5 bg-primary/10 rounded">HD</span>
                     </div>
