@@ -100,13 +100,16 @@ const AiCourseFactoryModal = lazyWithRetry(() => import('./AiCourseFactoryModal'
 const AiCourseEditModal = lazyWithRetry(() => import('./AiCourseEditModal').then(m => ({ default: m.AiCourseEditModal })));
 
 const CourseAdminCard = ({ course, courseStats, setViewingCourseId, setEditingCourseId, setShowCourseEditor, onDelete, onMove, onAiEdit }: any) => (
-  <div className="bg-zinc-900 border border-white/5 rounded-xl overflow-hidden group hover:border-blue-500/50 transition-all flex flex-col w-36 sm:w-44 shrink-0 shadow-2xl">
+  <div 
+    onClick={() => { setEditingCourseId(course.id); setShowCourseEditor(true); }}
+    className="bg-zinc-900 border border-white/5 rounded-xl overflow-hidden group hover:border-blue-500/50 transition-all flex flex-col w-36 sm:w-44 shrink-0 shadow-2xl cursor-pointer relative"
+  >
     <div className="relative aspect-[2/3] overflow-hidden shrink-0">
       {course.cover_url?.trim() ? (
         <img 
           src={course.cover_url.trim()} 
           alt={course.title} 
-          className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" 
+          className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" 
           referrerPolicy="no-referrer" 
         />
       ) : (
@@ -116,11 +119,66 @@ const CourseAdminCard = ({ course, courseStats, setViewingCourseId, setEditingCo
       )}
       <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent opacity-80" />
       
-      <div className="absolute inset-x-0 bottom-0 p-3 space-y-1">
+      {/* Barra superior de controles: Botão Editar fixo e transparente à esquerda, outros à direita no hover */}
+      <div className="absolute top-2 inset-x-2 z-20 flex items-center justify-between pointer-events-none">
+        {/* Botão de Editar Curso compacto, transparente e encostado à esquerda */}
+        <button 
+          type="button"
+          onClick={(e) => { 
+            e.stopPropagation(); 
+            setEditingCourseId(course.id); 
+            setShowCourseEditor(true); 
+          }}
+          className="pointer-events-auto flex items-center gap-1 py-1 px-2 rounded-md bg-black/35 hover:bg-black/65 active:bg-blue-600/70 text-white backdrop-blur-[2px] border border-white/20 hover:border-blue-400/50 font-bold text-[9px] sm:text-[10px] uppercase tracking-wider shadow-sm transition-all active:scale-95 cursor-pointer"
+          title="Editar Curso"
+        >
+          <Edit3 size={11} strokeWidth={2.2} className="shrink-0 text-white/90" />
+          <span>Editar</span>
+        </button>
+
+        {/* Botões secundários na direita (visíveis apenas no hover) */}
+        <div className="pointer-events-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button 
+            type="button"
+            onClick={(e) => { 
+              e.stopPropagation(); 
+              onAiEdit?.(course); 
+            }}
+            className="p-1 bg-black/40 hover:bg-amber-500 text-white rounded-md backdrop-blur-sm transition-all border border-white/20 shadow-sm active:scale-95 cursor-pointer"
+            title="Editar com IA"
+          >
+            <Sparkles size={11} />
+          </button>
+          <button 
+            type="button"
+            onClick={(e) => { 
+              e.stopPropagation(); 
+              setViewingCourseId(course.id); 
+            }}
+            className="p-1 bg-black/40 hover:bg-white text-white hover:text-black rounded-md backdrop-blur-sm transition-all border border-white/20 shadow-sm active:scale-95 cursor-pointer"
+            title="Visualizar Grade"
+          >
+            <Eye size={11} />
+          </button>
+          <button 
+            type="button"
+            onClick={(e) => { 
+              e.stopPropagation(); 
+              onDelete(course.id, course.title, !course.is_bonus && !course.is_free); 
+            }}
+            className="p-1 bg-black/40 hover:bg-red-600 text-white rounded-md backdrop-blur-sm transition-all border border-white/20 shadow-sm active:scale-95 cursor-pointer"
+            title="Excluir"
+          >
+            <Trash2 size={11} />
+          </button>
+        </div>
+      </div>
+
+      <div className="absolute inset-x-0 bottom-0 p-3 space-y-1 z-10 pointer-events-none">
         <h4 className="font-black text-[10px] sm:text-xs text-white leading-tight line-clamp-2 drop-shadow-md uppercase italic">
           {course.title}
         </h4>
-        <div className="text-[8px] font-black text-blue-500 uppercase tracking-tighter drop-shadow-md flex items-center gap-1">
+        <div className="text-[8px] font-black text-blue-400 uppercase tracking-tighter drop-shadow-md flex items-center gap-1">
           {course.is_bonus ? 'BÔNUS 🎁' : course.is_free ? 'PRODUTO PRINCIPAL 💎' : 'PREMIUM'}
           {course.is_package_exclusive_bonus && (
              <div className={`${course.is_bonus ? 'bg-purple-600' : 'bg-emerald-600'} p-0.5 rounded shadow-sm border ${course.is_bonus ? 'border-purple-400/50' : 'border-emerald-400/50'}`} title="Liberado via Pacote">
@@ -130,53 +188,23 @@ const CourseAdminCard = ({ course, courseStats, setViewingCourseId, setEditingCo
         </div>
       </div>
 
-      {/* Admin floating controls */}
-      <div className="absolute top-2 right-2 flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-        <button 
-          onClick={() => onAiEdit?.(course)}
-          className="p-1.5 bg-gradient-to-r from-amber-500 to-rose-500 hover:brightness-110 text-white rounded-lg backdrop-blur-md transition-all shadow-lg"
-          title="Editar com IA"
-        >
-          <Sparkles size={14} />
-        </button>
-        <button 
-          onClick={() => setViewingCourseId(course.id)}
-          className="p-1.5 bg-white/20 hover:bg-white text-white hover:text-black rounded-lg backdrop-blur-md transition-all shadow-lg"
-          title="Visualizar Grade"
-        >
-          <Eye size={14} />
-        </button>
-        <button 
-          onClick={() => { setEditingCourseId(course.id); setShowCourseEditor(true); }}
-          className="p-1.5 bg-white/20 hover:bg-white text-white hover:text-black rounded-lg backdrop-blur-md transition-all shadow-lg"
-          title="Editar Curso"
-        >
-          <Edit3 size={14} />
-        </button>
-        <button 
-          onClick={() => onDelete(course.id, course.title, !course.is_bonus && !course.is_free)}
-          className="p-1.5 bg-red-500/80 hover:bg-red-500 text-white rounded-lg backdrop-blur-md transition-all shadow-lg"
-          title="Excluir"
-        >
-          <Trash2 size={14} />
-        </button>
-      </div>
-
       {/* Move arrows */}
-      <div className="absolute bottom-2 right-2 flex gap-1 opacity-100 transition-opacity">
+      <div className="absolute bottom-2 right-2 flex gap-1 opacity-100 transition-opacity z-20">
         <button 
+          type="button"
           onClick={(e) => { e.stopPropagation(); onMove(course.id, 'up'); }}
-          className="p-1 sm:p-1.5 bg-black/60 hover:bg-blue-600 text-white rounded-lg backdrop-blur-md transition-all border border-white/20 shadow-xl"
+          className="p-1 sm:p-1.5 bg-black/70 hover:bg-blue-600 text-white rounded-lg backdrop-blur-md transition-all border border-white/20 shadow-xl active:scale-95 cursor-pointer"
           title="Mover para esquerda"
         >
-          <ChevronLeft size={16} strokeWidth={3} />
+          <ChevronLeft size={14} strokeWidth={3} />
         </button>
         <button 
+          type="button"
           onClick={(e) => { e.stopPropagation(); onMove(course.id, 'down'); }}
-          className="p-1 sm:p-1.5 bg-black/60 hover:bg-blue-600 text-white rounded-lg backdrop-blur-md transition-all border border-white/20 shadow-xl"
+          className="p-1 sm:p-1.5 bg-black/70 hover:bg-blue-600 text-white rounded-lg backdrop-blur-md transition-all border border-white/20 shadow-xl active:scale-95 cursor-pointer"
           title="Mover para direita"
         >
-          <ChevronRight size={16} strokeWidth={3} />
+          <ChevronRight size={14} strokeWidth={3} />
         </button>
       </div>
     </div>
@@ -1019,6 +1047,9 @@ export default function AdminPanel({ user }: AdminPanelProps) {
     setSimResult(null);
     try {
       const { data: { session } } = await supabase.auth.getSession();
+      const currentToken = customWebhookTokenInput.trim() || settings?.custom_texts?.['hotmart.webhook_token'] || '';
+      const currentTargetUrl = customWebhookInput.trim() || settings?.custom_texts?.['hotmart.webhook_url'] || '';
+
       const res = await safeFetch('/api/v1/admin?action=webhook-simulate', {
         method: 'POST',
         headers: {
@@ -1028,7 +1059,9 @@ export default function AdminPanel({ user }: AdminPanelProps) {
         body: JSON.stringify({
           buyer_email: simTestEmail.trim(),
           hotmart_product_id: simTestProductId.trim(),
-          event_type: simTestEvent
+          event_type: simTestEvent,
+          webhook_token: currentToken,
+          target_url: currentTargetUrl
         })
       });
 

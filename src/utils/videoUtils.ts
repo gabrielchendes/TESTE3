@@ -108,12 +108,44 @@ export function cleanVideoUrl(rawUrl: string): string {
     trimmed = trimmed.replace('http://', 'https://');
   }
 
-  // Encode unencoded whitespace in file paths (e.g. Brazilian lesson names: "Aula 01.mp4" -> "Aula%2001.mp4")
-  if (trimmed.includes(' ') && !trimmed.includes('%20')) {
-    trimmed = trimmed.replace(/ /g, '%20');
+  // Safely percent-encode any unencoded non-ASCII or space characters in URL for Safari WebKit
+  try {
+    trimmed = encodeURI(decodeURI(trimmed));
+  } catch {
+    if (trimmed.includes(' ') && !trimmed.includes('%20')) {
+      trimmed = trimmed.replace(/ /g, '%20');
+    }
   }
 
   return trimmed;
+}
+
+export function isSafariBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  const vendor = navigator.vendor || '';
+  const isAppleVendor = /Apple/i.test(vendor);
+  const isSafariUa = /Safari/i.test(ua) && !/Chrome|CriOS|Chromium|Edg|OPR|Android/i.test(ua);
+  const isIos = /iPad|iPhone|iPod/.test(ua) || (typeof navigator.platform === 'string' && navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  return isSafariUa || (isAppleVendor && !/Chrome|CriOS/i.test(ua)) || isIos;
+}
+
+export function isCloudflareR2Url(url: string): boolean {
+  if (!url) return false;
+  const lower = url.toLowerCase();
+  return (
+    lower.includes('r2.dev') ||
+    lower.includes('r2.cloudflarestorage.com') ||
+    lower.includes('.r2.') ||
+    lower.includes('/r2/') ||
+    lower.includes('cloudflare-r2') ||
+    (lower.includes('cloudflare') && !isCloudflareStreamUrl(url) && !url.includes('.m3u8'))
+  );
+}
+
+export function getVideoProxyUrl(directUrl: string): string {
+  if (!directUrl) return '';
+  return `/api/v1/video-proxy?url=${encodeURIComponent(directUrl)}`;
 }
 
 export function getVideoMimeType(url: string): string {

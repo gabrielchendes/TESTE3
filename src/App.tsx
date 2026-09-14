@@ -6,9 +6,8 @@ import { lazyWithRetry } from './lib/lazyWithRetry';
 import { safeFetch } from './lib/utils';
 import { toast } from 'sonner';
 import LoginPage from './pages/LoginPage';
+import Dashboard from './pages/Dashboard';
 import { GlowingSpinner } from './components/GlowingSpinner';
-
-const Dashboard = lazyWithRetry(() => import('./pages/Dashboard'));
 
 // Smooth hardware-accelerated Loading Screen
 function LoadingScreen() {

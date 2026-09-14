@@ -13,7 +13,9 @@ const isRevokedKey = (key?: string) => {
     trimmed === '' || 
     trimmed === 'undefined' || 
     trimmed === 'null' ||
-    trimmed === 'placeholder-key'
+    trimmed === 'placeholder-key' ||
+    trimmed.startsWith('sb_secret_') ||
+    (!trimmed.startsWith('eyJ') && !trimmed.startsWith('sbp_') && !trimmed.startsWith('sb_publishable_'))
   );
 };
 
@@ -42,6 +44,43 @@ const supabaseAdmin = createClient(
     }
   }
 );
+
+// Safe helper to read app_settings with fallback to public anon client if admin key is invalid
+async function getAppSettingsSafe() {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('app_settings')
+      .select('custom_texts, admin_email, app_url')
+      .eq('id', 1)
+      .maybeSingle();
+
+    if (!error && data) return data;
+
+    if (supabaseAnonKey) {
+      const anonClient = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey);
+      const { data: anonData } = await anonClient
+        .from('app_settings')
+        .select('custom_texts, admin_email, app_url')
+        .eq('id', 1)
+        .maybeSingle();
+      if (anonData) return anonData;
+    }
+    return data || null;
+  } catch (err) {
+    if (supabaseAnonKey) {
+      try {
+        const anonClient = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey);
+        const { data: anonData } = await anonClient
+          .from('app_settings')
+          .select('custom_texts, admin_email, app_url')
+          .eq('id', 1)
+          .maybeSingle();
+        return anonData || null;
+      } catch {}
+    }
+    return null;
+  }
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -72,7 +111,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     let user: any = null;
     try {
-      const { data, error: authError } = await supabaseAdmin.auth.getUser(token);
+      let { data, error: authError } = await supabaseAdmin.auth.getUser(token);
+      if ((authError || !data?.user) && supabaseAnonKey) {
+        const anonClient = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey);
+        const anonRes = await anonClient.auth.getUser(token);
+        if (anonRes.data?.user) {
+          data = anonRes.data;
+          authError = null;
+        }
+      }
       if (authError || !data?.user) {
         console.warn('[Admin API] auth.getUser warning:', authError?.message);
         return res.status(401).json({ error: 'Session expired or invalid token. Please log in again.' });
@@ -84,8 +131,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Admin Verification (Double Check)
-    const { data: profile } = await supabaseAdmin.from('profiles').select('email, is_admin').eq('id', user.id).maybeSingle();
-    const { data: settings } = await supabaseAdmin.from('app_settings').select('admin_email, app_url').eq('id', 1).maybeSingle();
+    let profile: any = null;
+    try {
+      const pRes = await supabaseAdmin.from('profiles').select('email, is_admin').eq('id', user.id).maybeSingle();
+      profile = pRes.data;
+    } catch {}
+    const settings = await getAppSettingsSafe();
     
     const isHardcodedAdmin = user.email?.toLowerCase() === 'gabrielchendes@gmail.com';
     const isSuperAdmin = (settings?.admin_email && user.email?.toLowerCase() === settings.admin_email.toLowerCase()) || isHardcodedAdmin;
@@ -1512,19 +1563,26 @@ async function handleWebhookEventsList(req: VercelRequest, res: VercelResponse) 
 
 async function handleWebhookSimulate(req: VercelRequest, res: VercelResponse) {
   try {
-    const { buyer_email, hotmart_product_id, event_type } = req.body;
+    const { buyer_email, hotmart_product_id, event_type, webhook_token, target_url } = req.body || {};
     if (!buyer_email || !event_type) {
       return res.status(400).json({ error: 'Buyer email and event type are required.' });
     }
 
-    const { data: settings } = await supabaseAdmin
-      .from('app_settings')
-      .select('custom_texts')
-      .eq('id', 1)
-      .maybeSingle();
+    const settings = await getAppSettingsSafe();
 
-    const configuredToken = process.env.HOTMART_WEBHOOK_TOKEN || settings?.custom_texts?.['hotmart.webhook_token'] || 'SIMULATION_TOKEN';
-    let targetWebhookUrl = settings?.custom_texts?.['hotmart.webhook_url'];
+    const cleanToken = (t?: any) => t ? String(t).trim().replace(/^["']|["']$/g, '').trim() : '';
+
+    const providedToken = cleanToken(webhook_token);
+    const settingsToken = cleanToken(settings?.custom_texts?.['hotmart.webhook_token']);
+    const envToken = cleanToken(process.env.HOTMART_WEBHOOK_TOKEN);
+
+    // Prioritize explicit token sent by the Admin Panel UI, then database settings, then env, then fallback
+    const configuredToken = providedToken || settingsToken || envToken || 'SIMULATION_TOKEN';
+
+    const providedTargetUrl = (target_url && typeof target_url === 'string') ? target_url.trim() : '';
+    const settingsTargetUrl = (settings?.custom_texts?.['hotmart.webhook_url'] && typeof settings.custom_texts['hotmart.webhook_url'] === 'string') ? settings.custom_texts['hotmart.webhook_url'].trim() : '';
+
+    let targetWebhookUrl = providedTargetUrl || settingsTargetUrl;
 
     // Fallback para URL do Supabase do ambiente se a URL configurada não for fornecida ou for um placeholder
     const envSupabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -1650,6 +1708,7 @@ async function handleWebhookSimulate(req: VercelRequest, res: VercelResponse) {
         }
       },
       hottok: configuredToken,
+      token: configuredToken,
       is_simulation: true
     };
 
@@ -1722,19 +1781,31 @@ async function handleWebhookSimulate(req: VercelRequest, res: VercelResponse) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000);
 
-      const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+      let finalTargetUrl = targetWebhookUrl.trim();
+      try {
+        const parsedUrl = new URL(finalTargetUrl);
+        if (!parsedUrl.searchParams.has('hottok')) {
+          parsedUrl.searchParams.set('hottok', configuredToken);
+        }
+        if (!parsedUrl.searchParams.has('x-simulation')) {
+          parsedUrl.searchParams.set('x-simulation', 'true');
+        }
+        finalTargetUrl = parsedUrl.toString();
+      } catch {}
+
+      const keyToSend = supabaseServiceRoleKey || supabaseAnonKey;
       const headersToSend: Record<string, string> = {
         'Content-Type': 'application/json',
         'x-hotmart-hottok': configuredToken,
         'x-simulation': 'true'
       };
 
-      if (supabaseAnonKey) {
-        headersToSend['apikey'] = supabaseAnonKey;
-        headersToSend['Authorization'] = `Bearer ${supabaseAnonKey}`;
+      if (keyToSend) {
+        headersToSend['apikey'] = keyToSend;
+        headersToSend['Authorization'] = `Bearer ${keyToSend}`;
       }
 
-      const edgeRes = await fetch(targetWebhookUrl.trim(), {
+      const edgeRes = await fetch(finalTargetUrl, {
         method: 'POST',
         headers: headersToSend,
         body: JSON.stringify(mockPayload),

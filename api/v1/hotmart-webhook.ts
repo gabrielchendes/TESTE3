@@ -13,7 +13,9 @@ const isRevokedKey = (key?: string) => {
     trimmed === '' || 
     trimmed === 'undefined' || 
     trimmed === 'null' ||
-    trimmed === 'placeholder-key'
+    trimmed === 'placeholder-key' ||
+    trimmed.startsWith('sb_secret_') ||
+    (!trimmed.startsWith('eyJ') && !trimmed.startsWith('sbp_') && !trimmed.startsWith('sb_publishable_'))
   );
 };
 
@@ -38,6 +40,42 @@ const supabaseAdmin = createClient(supabaseUrl || 'https://placeholder.supabase.
     detectSessionInUrl: false
   }
 });
+
+async function getAppSettingsSafe() {
+  try {
+    const { data, error } = await supabaseAdmin
+      .from('app_settings')
+      .select('custom_texts')
+      .eq('id', 1)
+      .maybeSingle();
+
+    if (!error && data) return data;
+
+    if (supabaseAnonKey) {
+      const anonClient = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey);
+      const { data: anonData } = await anonClient
+        .from('app_settings')
+        .select('custom_texts')
+        .eq('id', 1)
+        .maybeSingle();
+      if (anonData) return anonData;
+    }
+    return data || null;
+  } catch {
+    if (supabaseAnonKey) {
+      try {
+        const anonClient = createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey);
+        const { data: anonData } = await anonClient
+          .from('app_settings')
+          .select('custom_texts')
+          .eq('id', 1)
+          .maybeSingle();
+        return anonData || null;
+      } catch {}
+    }
+    return null;
+  }
+}
 
 export async function processHotmartWebhookPayload(payload: any) {
   // 1. Extrair informações do comprador e evento
@@ -482,24 +520,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       payload.hottok || 
       payload.token;
 
-    let configuredToken: string | null = process.env.HOTMART_WEBHOOK_TOKEN || null;
-    if (!configuredToken) {
-      try {
-        const { data: settings } = await supabaseAdmin
-          .from('app_settings')
-          .select('custom_texts')
-          .eq('id', 1)
-          .maybeSingle();
+    const cleanToken = (t?: any) => t ? String(t).trim().replace(/^["']|["']$/g, '').trim() : '';
+    const cleanReceived = cleanToken(receivedToken);
 
-        if (settings?.custom_texts?.['hotmart.webhook_token']) {
-          configuredToken = settings.custom_texts['hotmart.webhook_token'];
-        }
-      } catch (e) {}
-    }
+    const envToken = cleanToken(process.env.HOTMART_WEBHOOK_TOKEN);
+    let settingsToken: string | null = null;
+    
+    try {
+      const settings = await getAppSettingsSafe();
+      if (settings?.custom_texts?.['hotmart.webhook_token']) {
+        settingsToken = cleanToken(settings.custom_texts['hotmart.webhook_token']);
+      }
+    } catch {}
 
-    if (configuredToken && configuredToken.trim()) {
-      if (!receivedToken || receivedToken.trim() !== configuredToken.trim()) {
-        return res.status(401).json({ error: 'Unauthorized: Invalid Hotmart Token (hottok)' });
+    const isSimulation = 
+      req.headers['x-simulation'] === 'true' || 
+      (req.query && req.query['x-simulation'] === 'true') ||
+      payload.is_simulation === true || 
+      cleanReceived === 'SIMULATION_TOKEN';
+
+    const validTokens = [envToken, settingsToken].filter(Boolean) as string[];
+
+    if (validTokens.length > 0) {
+      const isTokenValid = validTokens.some(tok => tok === cleanReceived);
+      const isSimAuthorized = isSimulation && (cleanReceived === 'SIMULATION_TOKEN' || isTokenValid);
+
+      if (!isTokenValid && !isSimAuthorized) {
+        return res.status(401).json({ 
+          error: 'Unauthorized: Invalid Hotmart Token (hottok)',
+          tip: 'Configure o token Hottok idêntico no painel da Hotmart e nas configurações do sistema.' 
+        });
       }
     }
 

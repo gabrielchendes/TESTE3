@@ -44,7 +44,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
           // Fallback for demo if table doesn't exist
           setTenant({
             id: 'default-tenant',
-            name: 'Premium App',
+            name: 'Missing Trigger',
             subdomain: 'app',
             primary_color: '#ef4444'
           });

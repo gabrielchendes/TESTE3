@@ -15,7 +15,11 @@
         },
         {
           "key": "Access-Control-Allow-Headers",
-          "value": "Content-Type, Authorization, Range, X-Requested-With"
+          "value": "Content-Type, Authorization, Range, X-Requested-With, Accept, User-Agent"
+        },
+        {
+          "key": "Access-Control-Expose-Headers",
+          "value": "Content-Range, Content-Length, Accept-Ranges, Content-Type"
         },
         {
           "key": "Referrer-Policy",
@@ -88,6 +92,10 @@
     {
       "source": "/api/v1/sub-topic",
       "destination": "/api/v1/notifications?action=sub-topic"
+    },
+    {
+      "source": "/api/v1/video-proxy",
+      "destination": "/api/v1/video-proxy"
     },
     {
       "source": "/api/v1/generate-permanent-link",

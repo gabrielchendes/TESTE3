@@ -15,7 +15,9 @@ const isRevokedKey = (key?: string) => {
     trimmed === '' || 
     trimmed === 'undefined' || 
     trimmed === 'null' ||
-    trimmed === 'placeholder-key'
+    trimmed === 'placeholder-key' ||
+    trimmed.startsWith('sb_secret_') ||
+    (!trimmed.startsWith('eyJ') && !trimmed.startsWith('sbp_') && !trimmed.startsWith('sb_publishable_'))
   );
 };
 

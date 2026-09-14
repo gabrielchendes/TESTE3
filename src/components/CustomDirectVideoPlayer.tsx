@@ -15,7 +15,16 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import Hls from 'hls.js';
 import { GlowingSpinner } from './GlowingSpinner';
-import { getCloudflareHlsUrl, getCloudflareStreamEmbedUrl, isCloudflareStreamUrl, cleanVideoUrl } from '../utils/videoUtils';
+import { 
+  getCloudflareHlsUrl, 
+  getCloudflareStreamEmbedUrl, 
+  isCloudflareStreamUrl, 
+  cleanVideoUrl,
+  isSafariBrowser,
+  isCloudflareR2Url,
+  isDirectVideoUrl,
+  getVideoProxyUrl
+} from '../utils/videoUtils';
 
 interface CustomDirectVideoPlayerProps {
   url: string;
@@ -138,6 +147,10 @@ export default function CustomDirectVideoPlayer({
   const [qualityNotification, setQualityNotification] = useState<string | null>(null);
   const qualityNotificationTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [useIframeFallback, setUseIframeFallback] = useState(false);
+  const [hasTriedProxyFallback, setHasTriedProxyFallback] = useState(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [autoplayMutedNotice, setAutoplayMutedNotice] = useState(false);
+  const [currentMediaUrl, setCurrentMediaUrl] = useState<string>('');
   const hlsRef = useRef<Hls | null>(null);
   const [skipFeedback, setSkipFeedback] = useState<{ id: number; type: 'back' | 'forward' } | null>(null);
   const [isScrubbing, setIsScrubbing] = useState(false);
@@ -185,13 +198,11 @@ export default function CustomDirectVideoPlayer({
   // Initialize media source: HLS for Cloudflare Stream & .m3u8, or native HTML5 for direct video
   useEffect(() => {
     setUseIframeFallback(false);
+    setPlaybackError(null);
+    setAutoplayMutedNotice(false);
     setIsLoading(true);
     const video = videoRef.current;
     if (!video) return;
-
-    try {
-      (video as any).referrerPolicy = 'no-referrer';
-    } catch {}
 
     if (hlsRef.current) {
       hlsRef.current.destroy();
@@ -200,7 +211,20 @@ export default function CustomDirectVideoPlayer({
 
     const cleanedUrl = cleanVideoUrl(url);
     const hlsUrl = getCloudflareHlsUrl(cleanedUrl);
-    const effectiveUrl = hlsUrl || cleanedUrl;
+    const isR2 = isCloudflareR2Url(cleanedUrl);
+    const isSafari = isSafariBrowser();
+
+    // Critical: In Safari / iOS WebKit, Cloudflare R2 bucket URLs fail due to lack of CORS headers,
+    // missing 206 Partial Content byte ranges, or application/octet-stream content types.
+    // If the browser is Safari (or iOS) and the URL is hosted on Cloudflare R2 or is a direct MP4,
+    // route it through the streaming proxy immediately to ensure 100% smooth playback without delay!
+    let initialUrl = hlsUrl || cleanedUrl;
+    if (!hlsUrl && (isR2 || (isSafari && isDirectVideoUrl(cleanedUrl)))) {
+      initialUrl = getVideoProxyUrl(cleanedUrl);
+      setHasTriedProxyFallback(true);
+    }
+    const effectiveUrl = initialUrl;
+    setCurrentMediaUrl(effectiveUrl);
     const isHls = effectiveUrl.includes('.m3u8') || effectiveUrl.includes('/manifest');
 
     // If it's explicitly an iframe URL already
@@ -212,6 +236,60 @@ export default function CustomDirectVideoPlayer({
 
     let networkRetries = 0;
     let mediaRetries = 0;
+
+    const playWithAutoplayPolicy = () => {
+      if (!autoPlay) {
+        setIsLoading(false);
+        return;
+      }
+      const playPromise = video.play();
+      if (playPromise !== undefined) {
+        playPromise
+          .then(() => {
+            setIsPlaying(true);
+            setIsLoading(false);
+          })
+          .catch((err) => {
+            console.log('[Player] Autoplay prevented by browser:', err?.name, err?.message);
+            // In Safari and iOS WebKit, unmuted autoplay without prior interaction is rejected (NotAllowedError).
+            // Gracefully fall back to muted autoplay with an un-mute prompt so playback starts immediately:
+            if (err?.name === 'NotAllowedError') {
+              console.log('[Player] Falling back to muted autoplay for Safari...');
+              video.muted = true;
+              setIsMuted(true);
+              video.play()
+                .then(() => {
+                  setIsPlaying(true);
+                  setIsLoading(false);
+                  setAutoplayMutedNotice(true);
+                })
+                .catch(() => {
+                  setIsPlaying(false);
+                  setIsLoading(false);
+                });
+            } else {
+              setIsPlaying(false);
+              setIsLoading(false);
+            }
+          });
+      }
+    };
+
+    // Safari stall watchdog: if a direct video stays in readyState 0 for 2.5s without firing error
+    let stallWatchdog: ReturnType<typeof setTimeout> | null = null;
+    if (!isHls && !useIframeFallback) {
+      stallWatchdog = setTimeout(() => {
+        if (video && video.readyState === 0 && !hasTriedProxyFallback) {
+          console.warn('[Player] Video stalled on direct URL in Safari/WebKit. Switching to streaming proxy...');
+          setHasTriedProxyFallback(true);
+          const proxyUrl = getVideoProxyUrl(cleanedUrl);
+          setCurrentMediaUrl(proxyUrl);
+          video.src = proxyUrl;
+          video.load();
+          playWithAutoplayPolicy();
+        }
+      }, 2500);
+    }
 
     if (isHls && Hls.isSupported()) {
       const hls = new Hls({
@@ -248,13 +326,7 @@ export default function CustomDirectVideoPlayer({
           parsed.sort((a, b) => (b.height || 0) - (a.height || 0));
           setHlsLevels(parsed);
         }
-        if (autoPlay) {
-          video.play().catch((err) => {
-            console.log('[Player] Autoplay prevented by browser, click play to start:', err?.message);
-            setIsPlaying(false);
-            setIsLoading(false);
-          });
-        }
+        playWithAutoplayPolicy();
       });
 
       hls.on(Hls.Events.LEVEL_SWITCHED, (_event, data) => {
@@ -327,37 +399,19 @@ export default function CustomDirectVideoPlayer({
       setIsLoading(true);
       video.src = effectiveUrl;
       video.load();
-      if (autoPlay) {
-        video.play().then(() => {
-          setIsPlaying(true);
-          setIsLoading(false);
-        }).catch((err) => {
-          console.log('[Player] Autoplay prevented by browser, click play to start:', err?.message);
-          setIsPlaying(false);
-          setIsLoading(false);
-        });
-      } else {
-        setIsLoading(false);
-      }
+      playWithAutoplayPolicy();
     } else {
       // Direct MP4, WebM, Cloudflare R2, Supabase Storage, etc.
+      video.preload = 'metadata';
       video.src = effectiveUrl;
       video.load();
-      if (autoPlay) {
-        video.play().then(() => {
-          setIsPlaying(true);
-          setIsLoading(false);
-        }).catch((err) => {
-          console.log('[Player] Autoplay prevented by browser, click play to start:', err?.message);
-          setIsPlaying(false);
-          setIsLoading(false);
-        });
-      } else {
-        setIsLoading(false);
-      }
+      playWithAutoplayPolicy();
     }
 
     return () => {
+      if (stallWatchdog) {
+        clearTimeout(stallWatchdog);
+      }
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -414,15 +468,55 @@ export default function CustomDirectVideoPlayer({
       setIsPlaying(false);
       if (onEnded) onEnded();
     };
+
+    const handleStalled = () => {
+      // In Safari WebKit, direct R2 or unbuffered video stalls without firing error when Range 206 fails
+      if (video.readyState === 0 && !hasTriedProxyFallback) {
+        console.warn('[Player] Stalled event on direct video. Activating Safari streaming proxy...');
+        setHasTriedProxyFallback(true);
+        const proxyUrl = getVideoProxyUrl(cleanVideoUrl(url));
+        setCurrentMediaUrl(proxyUrl);
+        video.src = proxyUrl;
+        video.load();
+        video.play().catch(() => {});
+      }
+    };
+
     const handleVideoError = () => {
-      console.warn('[Player] Video element error:', video.error?.code, video.error?.message);
+      const errCode = video.error?.code;
+      const errMsg = video.error?.message;
+      console.warn('[Player] Video element error:', errCode, errMsg);
       setIsLoading(false);
       setIsBuffering(false);
       const cleaned = cleanVideoUrl(url);
+
+      // Cloudflare Stream HLS -> iframe fallback
       if (isCloudflareStreamUrl(cleaned) || getCloudflareStreamEmbedUrl(cleaned)) {
         console.warn('[Player] Video tag error on Cloudflare stream. Falling back to iframe embed...');
         setUseIframeFallback(true);
+        return;
       }
+
+      // Direct Cloudflare R2 / S3 / MP4 video failed in Safari (due to missing 206 Partial Content, CORS, or octet-stream MIME)
+      if (!hasTriedProxyFallback) {
+        console.warn('[Player] Direct video playback failed on this browser. Activating Safari/R2 streaming proxy...');
+        setHasTriedProxyFallback(true);
+        const proxyUrl = getVideoProxyUrl(cleaned);
+        setCurrentMediaUrl(proxyUrl);
+        video.src = proxyUrl;
+        video.load();
+        video.play().then(() => {
+          setIsPlaying(true);
+          setIsLoading(false);
+        }).catch((err) => {
+          console.log('[Player] Autoplay on proxy prevented:', err?.message);
+          setIsPlaying(false);
+          setIsLoading(false);
+        });
+        return;
+      }
+
+      setPlaybackError('Não foi possível carregar este vídeo no Safari/Navegador. Toque para tentar novamente.');
     };
 
     // If metadata was already cached by browser
@@ -439,6 +533,7 @@ export default function CustomDirectVideoPlayer({
     video.addEventListener('playing', handlePlaying);
     video.addEventListener('canplay', handleCanPlay);
     video.addEventListener('ended', handleEnded);
+    video.addEventListener('stalled', handleStalled);
     video.addEventListener('error', handleVideoError);
 
     return () => {
@@ -451,9 +546,10 @@ export default function CustomDirectVideoPlayer({
       video.removeEventListener('playing', handlePlaying);
       video.removeEventListener('canplay', handleCanPlay);
       video.removeEventListener('ended', handleEnded);
+      video.removeEventListener('stalled', handleStalled);
       video.removeEventListener('error', handleVideoError);
     };
-  }, [url, isScrubbing, onEnded]);
+  }, [url, isScrubbing, onEnded, hasTriedProxyFallback]);
 
   // Fullscreen change listener supporting all engines and mobile browsers (iOS/WebKit)
   useEffect(() => {
@@ -527,11 +623,51 @@ export default function CustomDirectVideoPlayer({
     }
   };
 
+  const retryPlayback = (forceProxy: boolean = true) => {
+    setPlaybackError(null);
+    setIsLoading(true);
+    const video = videoRef.current;
+    if (!video) return;
+    const cleaned = cleanVideoUrl(url);
+    const targetUrl = forceProxy || !hasTriedProxyFallback ? getVideoProxyUrl(cleaned) : cleaned;
+    setHasTriedProxyFallback(true);
+    setCurrentMediaUrl(targetUrl);
+    video.src = targetUrl;
+    video.load();
+    video.play().then(() => {
+      setIsPlaying(true);
+      setIsLoading(false);
+    }).catch((err) => {
+      console.warn('[Player] Retry play catch:', err);
+      setIsPlaying(false);
+      setIsLoading(false);
+    });
+  };
+
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
+    if (playbackError) {
+      retryPlayback(true);
+      return;
+    }
     if (video.paused) {
-      video.play().catch(() => {});
+      if (autoplayMutedNotice) {
+        video.muted = false;
+        setIsMuted(false);
+        setAutoplayMutedNotice(false);
+      }
+      // If video has stalled on direct URL in Safari (readyState is 0)
+      if (video.readyState === 0 && !hasTriedProxyFallback) {
+        retryPlayback(true);
+        return;
+      }
+      video.play().catch((err) => {
+        console.warn('[Player] Play error:', err);
+        if (!hasTriedProxyFallback) {
+          retryPlayback(true);
+        }
+      });
     } else {
       video.pause();
     }
@@ -920,14 +1056,61 @@ export default function CustomDirectVideoPlayer({
         isSimulatedFullscreen ? 'fixed inset-0 z-[9999999] w-screen h-screen' : ''
       }`}
     >
-      {/* HTML5 Native Video Tag */}
+      {/* HTML5 Native Video Tag with Safari WebKit compatibility */}
       <video
         ref={videoRef}
         playsInline
         webkit-playsinline="true"
-        preload="auto"
+        x5-playsinline="true"
+        preload="metadata"
+        muted={isMuted}
         className="w-full h-full object-contain cursor-pointer"
       />
+
+      {/* Safari Autoplay Muted Toast Banner */}
+      <AnimatePresence>
+        {autoplayMutedNotice && isPlaying && (
+          <motion.button
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              const video = videoRef.current;
+              if (video) {
+                video.muted = false;
+                setIsMuted(false);
+              }
+              setAutoplayMutedNotice(false);
+            }}
+            className="absolute top-4 left-4 z-40 px-3.5 py-2 rounded-full bg-black/85 hover:bg-black/95 border border-primary/50 text-white text-xs font-semibold flex items-center gap-2 shadow-2xl backdrop-blur-md cursor-pointer transition-all active:scale-95"
+          >
+            <VolumeX size={16} className="text-primary animate-pulse" />
+            <span>Vídeo iniciado sem áudio pelo navegador. Toque para ativar som</span>
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      {/* Playback Error Overlay with Retry */}
+      {playbackError && (
+        <div className="absolute inset-0 bg-black/85 backdrop-blur-sm z-30 flex flex-col items-center justify-center p-6 text-center">
+          <div className="w-14 h-14 rounded-full bg-red-500/20 text-red-400 flex items-center justify-center mb-3">
+            <X size={28} />
+          </div>
+          <p className="text-white text-sm max-w-sm mb-4 font-medium">{playbackError}</p>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              retryPlayback(true);
+            }}
+            className="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-bold tracking-wide flex items-center gap-2 shadow-lg transition-all active:scale-95 cursor-pointer"
+          >
+            Tentar Novamente (Modo Safari / Streaming)
+          </button>
+        </div>
+      )}
 
       {/* On-Screen Quality Change Notification Toast */}
       <AnimatePresence>

@@ -23,16 +23,20 @@ export function lazyWithRetry<T extends ComponentType<any>>(
           continue;
         }
 
-        const errorMessage = error?.message || '';
+        const lowerMsg = (error?.message || '').toLowerCase();
         const errorName = error?.name || '';
 
-        // Strictly match actual chunk/module network fetching failures
+        // Strictly match actual chunk/module network fetching failures across all browsers (Chrome, Safari, Firefox, iOS)
         const isChunkOrNetworkError = 
-          errorMessage.includes('Failed to fetch dynamically imported module') ||
-          errorMessage.includes('NetworkError') ||
-          errorMessage.includes('fetch resource') ||
-          errorMessage.includes('Failed to fetch') ||
-          errorMessage.includes('Loading chunk') ||
+          lowerMsg.includes('failed to fetch dynamically imported module') ||
+          lowerMsg.includes('error loading dynamically imported module') ||
+          lowerMsg.includes('importing a module script failed') ||
+          lowerMsg.includes('failed to load module script') ||
+          lowerMsg.includes('dynamically imported module') ||
+          lowerMsg.includes('networkerror') ||
+          lowerMsg.includes('fetch resource') ||
+          lowerMsg.includes('failed to fetch') ||
+          lowerMsg.includes('loading chunk') ||
           errorName === 'ChunkLoadError';
 
         if (isChunkOrNetworkError && typeof window !== 'undefined') {
