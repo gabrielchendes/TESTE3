@@ -926,7 +926,6 @@ export default function CustomDirectVideoPlayer({
         playsInline
         webkit-playsinline="true"
         preload="auto"
-        referrerPolicy="no-referrer"
         className="w-full h-full object-contain cursor-pointer"
       />
 

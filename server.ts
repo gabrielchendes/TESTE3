@@ -152,6 +152,12 @@ async function startServer() {
         req.query.action = subAction;
       }
 
+      if (apiPath.startsWith('v1/notifications/')) {
+        const subAction = apiPath.replace('v1/notifications/', '');
+        apiPath = 'v1/notifications';
+        req.query.action = subAction;
+      }
+
       if (rewrites[apiPath]) {
         const [newPath, newQuery] = rewrites[apiPath].split('?');
         apiPath = newPath;

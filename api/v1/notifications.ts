@@ -3,21 +3,6 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getMessaging } from 'firebase-admin/messaging';
 import { randomUUID } from 'crypto';
-import fs from 'fs';
-import path from 'path';
-
-// Ensure persistent storage directory exists
-const DATA_DIR = path.join(process.cwd(), 'data');
-const NOTIFICATIONS_STORE_FILE = path.join(DATA_DIR, 'internal_notifications.json');
-const HISTORY_STORE_FILE = path.join(DATA_DIR, 'notification_history.json');
-
-function ensureDataDir() {
-  try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-  } catch (e) {}
-}
 
 export interface InternalNotificationItem {
   id: string;
@@ -42,54 +27,6 @@ export interface HistoryItem {
   status: string;
   type: string;
   created_at: string;
-}
-
-function loadInternalNotifications(): InternalNotificationItem[] {
-  try {
-    ensureDataDir();
-    if (fs.existsSync(NOTIFICATIONS_STORE_FILE)) {
-      const content = fs.readFileSync(NOTIFICATIONS_STORE_FILE, 'utf-8');
-      const parsed = JSON.parse(content);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch (e) {
-    console.warn('[Notifications Storage] Error reading internal notifications:', e);
-  }
-  return [];
-}
-
-function saveInternalNotifications(items: InternalNotificationItem[]) {
-  try {
-    ensureDataDir();
-    const trimmed = items.slice(0, 3000);
-    fs.writeFileSync(NOTIFICATIONS_STORE_FILE, JSON.stringify(trimmed, null, 2), 'utf-8');
-  } catch (e) {
-    console.warn('[Notifications Storage] Error saving internal notifications:', e);
-  }
-}
-
-function loadHistory(): HistoryItem[] {
-  try {
-    ensureDataDir();
-    if (fs.existsSync(HISTORY_STORE_FILE)) {
-      const content = fs.readFileSync(HISTORY_STORE_FILE, 'utf-8');
-      const parsed = JSON.parse(content);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch (e) {
-    console.warn('[Notifications Storage] Error reading history:', e);
-  }
-  return [];
-}
-
-function saveHistory(items: HistoryItem[]) {
-  try {
-    ensureDataDir();
-    const trimmed = items.slice(0, 1000);
-    fs.writeFileSync(HISTORY_STORE_FILE, JSON.stringify(trimmed, null, 2), 'utf-8');
-  } catch (e) {
-    console.warn('[Notifications Storage] Error saving history:', e);
-  }
 }
 
 // Ensure DOMException is available globally for fetch-blob and google auth requests
@@ -132,7 +69,40 @@ const supabaseAnonKey =
   process.env.VITE_SUPABASE_ANON_KEY || 
   '';
 
-// Initialize Firebase Admin
+// Supabase Anon Client
+export const supabaseAnonClient = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseAnonKey || 'placeholder-key',
+  {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false
+    }
+  }
+);
+
+// Supabase Admin Client (Service Role for RLS bypass in serverless functions)
+export const supabaseAdmin = createClient(
+  supabaseUrl || 'https://placeholder.supabase.co',
+  supabaseServiceRoleKey || supabaseAnonKey || 'placeholder-key',
+  {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false
+    }
+  }
+);
+
+if (!supabaseUrl) {
+  console.error('[Notifications API] CRITICAL: Supabase URL is missing');
+}
+if (!supabaseServiceRoleKey) {
+  console.warn('[Notifications API] SUPABASE_SERVICE_ROLE_KEY is missing. Operating with anon client (RLS bypass may be restricted).');
+}
+
+// Initialize Firebase Admin (Optional / Push Notifications)
 let isFirebaseAdminInitialized = false;
 if (getApps().length === 0) {
   try {
@@ -166,7 +136,7 @@ if (getApps().length === 0) {
       isFirebaseAdminInitialized = true;
       console.log('[Notifications API] Firebase Admin initialized successfully');
     } else {
-      console.warn('[Notifications API] FIREBASE_SERVICE_ACCOUNT is missing. Checking fallback transport.');
+      console.warn('[Notifications API] FIREBASE_SERVICE_ACCOUNT is missing. Push fallback available via REST.');
     }
   } catch (e) {
     console.error('[Notifications API] Error initializing Firebase Admin:', e);
@@ -175,76 +145,164 @@ if (getApps().length === 0) {
   isFirebaseAdminInitialized = true;
 }
 
-if (!supabaseUrl) {
-  console.error('[Notifications API] CRITICAL: Supabase URL is missing');
-}
-if (!supabaseServiceRoleKey && !supabaseAnonKey) {
-  console.error('[Notifications API] CRITICAL: Supabase keys are missing');
-}
+/**
+ * Resilient insertion into public.notifications with full backward compatibility:
+ * Enforces user_id, broadcast_id, title, body, message (mirror of body), and is_read: false.
+ * Performs graceful progressive fallback if optional table columns do not exist.
+ */
+async function insertNotificationsResilient(
+  items: Array<{
+    id?: string;
+    user_id: string;
+    broadcast_id?: string | null;
+    title: string;
+    body: string;
+    message?: string;
+    is_read: boolean;
+    read?: boolean;
+    created_at?: string;
+    read_at?: string | null;
+    data?: any;
+  }>
+) {
+  if (!items.length) return;
+  const CHUNK_SIZE = 100;
 
-const supabaseAnonClient = createClient(
-  supabaseUrl || 'https://placeholder.supabase.co',
-  supabaseAnonKey || 'placeholder-key',
-  {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-      detectSessionInUrl: false
+  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    const chunk = items.slice(i, i + CHUNK_SIZE);
+    
+    // Attempt 1: Full payload with all backward-compatible fields
+    const fullRows = chunk.map(it => {
+      const content = it.body || it.message || '';
+      return {
+        id: it.id || randomUUID(),
+        user_id: it.user_id,
+        broadcast_id: it.broadcast_id || null,
+        title: it.title || 'Notificação',
+        body: content,
+        message: content,
+        is_read: false,
+        read: false,
+        created_at: it.created_at || new Date().toISOString(),
+        read_at: null,
+        data: it.data || {}
+      };
+    });
+
+    const { error: fullErr } = await supabaseAdmin.from('notifications').insert(fullRows);
+    if (!fullErr) continue;
+
+    console.warn('[Notifications API] Full notification insert failed, retrying standard payload:', fullErr.message);
+
+    // Attempt 2: Standard payload with core backward-compatible columns
+    const stdRows = chunk.map(it => {
+      const content = it.body || it.message || '';
+      return {
+        id: it.id || randomUUID(),
+        user_id: it.user_id,
+        broadcast_id: it.broadcast_id || null,
+        title: it.title || 'Notificação',
+        body: content,
+        message: content,
+        is_read: false,
+        created_at: it.created_at || new Date().toISOString()
+      };
+    });
+
+    const { error: stdErr } = await supabaseAdmin.from('notifications').insert(stdRows);
+    if (!stdErr) continue;
+
+    console.warn('[Notifications API] Standard insert failed, retrying without broadcast_id:', stdErr.message);
+
+    // Attempt 3: Without broadcast_id in case column is absent in custom legacy schema
+    const noBroadcastRows = chunk.map(it => {
+      const content = it.body || it.message || '';
+      return {
+        id: it.id || randomUUID(),
+        user_id: it.user_id,
+        title: it.title || 'Notificação',
+        body: content,
+        message: content,
+        is_read: false,
+        created_at: it.created_at || new Date().toISOString()
+      };
+    });
+
+    const { error: noBroadcastErr } = await supabaseAdmin.from('notifications').insert(noBroadcastRows);
+    if (!noBroadcastErr) continue;
+
+    console.warn('[Notifications API] Retry with minimal payload:', noBroadcastErr.message);
+
+    // Attempt 4: Minimal schema fallback
+    const minRows = chunk.map(it => {
+      const content = it.body || it.message || '';
+      return {
+        user_id: it.user_id,
+        title: it.title || 'Notificação',
+        body: content,
+        message: content,
+        is_read: false
+      };
+    });
+
+    const { error: minErr } = await supabaseAdmin.from('notifications').insert(minRows);
+    if (minErr) {
+      console.error('[Notifications API] Critical error inserting notifications into Supabase:', minErr.message);
     }
   }
-);
+}
 
-const supabaseAdmin = supabaseServiceRoleKey
-  ? createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseServiceRoleKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-        detectSessionInUrl: false
-      }
-    })
-  : supabaseAnonClient;
-
-function getClientForReq(req?: VercelRequest) {
-  const authHeader = req?.headers?.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.split(' ')[1];
-    if (token && token.length > 20) {
-      return createClient(supabaseUrl || 'https://placeholder.supabase.co', supabaseAnonKey || 'placeholder-key', {
-        global: {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        },
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-          detectSessionInUrl: false
-        }
+/**
+ * Resilient insertion into public.notification_history using supabaseAdmin
+ */
+async function insertHistoryResilient(historyItem: HistoryItem) {
+  try {
+    const { error } = await supabaseAdmin
+      .from('notification_history')
+      .insert({
+        id: historyItem.id,
+        title: historyItem.title || 'Notificação',
+        body: historyItem.body || '',
+        target_count: historyItem.target_count || 0,
+        read_count: historyItem.read_count || 0,
+        status: historyItem.status || 'sent',
+        type: historyItem.type || 'both',
+        created_at: historyItem.created_at || new Date().toISOString()
       });
+
+    if (error) {
+      console.warn('[Notifications API] History insert retry without read_count/id:', error.message);
+      await supabaseAdmin
+        .from('notification_history')
+        .insert({
+          title: historyItem.title || 'Notificação',
+          body: historyItem.body || '',
+          target_count: historyItem.target_count || 0,
+          status: historyItem.status || 'sent',
+          type: historyItem.type || 'both'
+        });
     }
+  } catch (err) {
+    console.warn('[Notifications API] Exception inserting notification_history:', err);
   }
-  if (supabaseServiceRoleKey) return supabaseAdmin;
-  return supabaseAnonClient;
 }
 
-if (!supabaseServiceRoleKey) {
-  console.warn('[Notifications API] SUPABASE_SERVICE_ROLE_KEY is missing or unregistered. Falling back to authenticated caller token and publishable key.');
-}
-
-async function checkAdmin(req: VercelRequest) {
+/**
+ * Verifies if the request is from an administrator
+ */
+async function checkAdmin(req: VercelRequest): Promise<boolean> {
   const authHeader = req.headers.authorization;
   if (!authHeader) return false;
   
   const token = authHeader.split(' ')[1];
   if (!token) return false;
 
-  const client = getClientForReq(req);
-
   try {
-    const { data: { user }, error } = await client.auth.getUser(token);
+    // 1. Verify user token via supabaseAdmin
+    const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
     
     if (error || !user) {
-      // Fallback: Check if JWT payload contains admin email
+      // Fallback: Check if JWT payload contains master admin email
       try {
         const payloadBase64 = token.split('.')[1];
         if (payloadBase64) {
@@ -253,24 +311,16 @@ async function checkAdmin(req: VercelRequest) {
             return true;
           }
         }
-      } catch (jwtErr) {}
-
-      if (error) {
-        console.error('[Notifications API] auth.getUser error:', {
-          message: error.message,
-          status: error.status,
-          token_preview: token.substring(0, 10) + '...'
-        });
-      }
+      } catch {}
       return false;
     }
 
-    const isHardcodedAdmin = user.email?.toLowerCase() === 'gabrielchendes@gmail.com';
-    if (isHardcodedAdmin) return true;
+    // Direct check for master admin email
+    if (user.email?.toLowerCase() === 'gabrielchendes@gmail.com') return true;
 
-    // Check profile and app_settings
-    const { data: profile } = await client.from('profiles').select('is_admin').eq('id', user.id).single();
-    const { data: settings } = await client.from('app_settings').select('admin_email').eq('id', 1).single();
+    // Check profiles and app_settings via supabaseAdmin (bypassing RLS)
+    const { data: profile } = await supabaseAdmin.from('profiles').select('is_admin').eq('id', user.id).single();
+    const { data: settings } = await supabaseAdmin.from('app_settings').select('admin_email').eq('id', 1).single();
     
     const isSuperAdmin = (settings?.admin_email && user.email?.toLowerCase() === settings.admin_email.toLowerCase()) || false;
     
@@ -295,15 +345,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   console.log(`[Notifications API] Request: ${req.method} ${req.url} | Action: ${action}`);
 
-  // Sensitive actions requiring admin
+  // Sensitive actions requiring admin privileges
   const adminActions = ['notification-history', 'notification-clear', 'notification-details', 'push-status'];
   if (adminActions.includes(action)) {
     const isAdmin = await checkAdmin(req);
     if (!isAdmin) return res.status(403).json({ error: 'Access denied: Administrators only.' });
   }
 
-  // Specialized check for notification-push: 
-  // Admins can broadcast to multiple users.
+  // Specialized check for notification-push: broadcast to multiple users requires admin
   if (action === 'notification-push') {
     const userIds = req.body?.userIds;
     if (userIds && Array.isArray(userIds) && userIds.length > 1) {
@@ -374,40 +423,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 }
 
-async function sendPushNotification(userIds: string[], title: string, body: string, customData?: Record<string, any>, client: any = supabaseAdmin) {
+/**
+ * Sends web push notifications via Firebase Admin or legacy FCM HTTP
+ */
+async function sendPushNotification(
+  userIds: string[], 
+  title: string, 
+  body: string, 
+  customData?: Record<string, any>, 
+  client: any = supabaseAdmin
+) {
   if (!userIds || !userIds.length) {
     return { success: false, reason: 'No user ID provided', count: 0, tokensFound: 0 };
   }
 
   try {
-    // 1. Get push tokens for targeted users
-    let tokens: any[] | null = null;
-    let tokenError: any = null;
-
-    const { data: primaryTokens, error: primaryError } = await client
+    // 1. Query push tokens using supabaseAdmin (bypassing RLS)
+    const { data: tokens, error: tokenError } = await client
       .from('push_tokens')
       .select('user_id, token')
       .in('user_id', userIds);
-
-    if (primaryError) {
-      console.warn('[Notifications API] Primary token fetch error, attempting fallback with anon client:', primaryError.message);
-      tokenError = primaryError;
-    } else {
-      tokens = primaryTokens;
-    }
-
-    // Fallback to supabaseAnonClient if primary client failed (e.g. key issue or token RLS)
-    if ((tokenError || !tokens) && client !== supabaseAnonClient) {
-      const { data: fallbackTokens, error: fallbackError } = await supabaseAnonClient
-        .from('push_tokens')
-        .select('user_id, token')
-        .in('user_id', userIds);
-
-      if (!fallbackError && fallbackTokens) {
-        tokens = fallbackTokens;
-        tokenError = null;
-      }
-    }
 
     if (tokenError) {
       console.error('[Notifications API] Supabase error fetching tokens:', tokenError);
@@ -424,11 +459,9 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
       };
     }
 
-    // Unique users with push enabled
     const userIdsWithPush: string[] = Array.from(new Set(tokens.map((t: any) => t.user_id).filter(Boolean)));
-
-    // Unique tokens
     const registrationTokens: string[] = Array.from(new Set(tokens.map((t: any) => t.token).filter(Boolean))) as string[];
+    
     if (registrationTokens.length === 0) {
       return { success: false, reason: 'Tokens inválidos ou vazios', count: 0, usersCount: 0, tokensFound: 0 };
     }
@@ -447,7 +480,6 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
       for (let i = 0; i < registrationTokens.length; i += BATCH_SIZE) {
         const batchTokens: string[] = registrationTokens.slice(i, i + BATCH_SIZE);
         
-        // FCM Admin SDK requires all data values to be strings
         const sanitizedData: Record<string, string> = {
           title: String(title || ''),
           body: String(body || ''),
@@ -485,7 +517,6 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
         totalSuccess += response.successCount;
         totalFailure += response.failureCount;
 
-        // Track failed tokens for cleanup
         if (response.failureCount > 0) {
           response.responses.forEach((resp, idx) => {
             if (!resp.success) {
@@ -552,18 +583,16 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
         console.error('[Notifications API] FCM Server Key request error:', fcmErr);
         return { success: false, reason: 'Error calling FCM: ' + fcmErr.message, count: 0, tokensFound: registrationTokens.length };
       }
-    } 
-    // Neither Transport Configured
-    else {
+    } else {
       return { 
         success: false, 
-        reason: 'Firebase credential not configured on the server (add FIREBASE_SERVICE_ACCOUNT or FIREBASE_SERVER_KEY to the environment variables).',
+        reason: 'Firebase credentials not configured on the server (add FIREBASE_SERVICE_ACCOUNT or FIREBASE_SERVER_KEY to environment variables).',
         tokensFound: registrationTokens.length,
         count: 0
       };
     }
     
-    // Clean up stale tokens asynchronously
+    // Clean up stale tokens asynchronously via supabaseAdmin
     if (failedTokens.length > 0) {
       client
         .from('push_tokens')
@@ -589,27 +618,25 @@ async function sendPushNotification(userIds: string[], title: string, body: stri
 }
 
 async function handleTestPush(req: VercelRequest, res: VercelResponse) {
-  const client = getClientForReq(req);
-  const { title = 'Push Notification Test 🚀', body = 'Your device is set up and successfully receiving notifications!' } = req.body;
+  const { title = 'Push Notification Test 🚀', body = 'Seu dispositivo está configurado e recebendo notificações com sucesso!' } = req.body;
   
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ error: 'Não autenticado' });
   
   const token = authHeader.split(' ')[1];
-  const { data: { user }, error: userErr } = await client.auth.getUser(token);
+  const { data: { user }, error: userErr } = await supabaseAdmin.auth.getUser(token);
   if (userErr || !user) return res.status(401).json({ error: 'Sessão inválida' });
 
-  const pushResult = await sendPushNotification([user.id], title, body, { test: 'true' }, client);
+  const pushResult = await sendPushNotification([user.id], title, body, { test: 'true' }, supabaseAdmin);
   return res.status(200).json({ success: true, pushResult });
 }
 
 async function handlePushStatus(req: VercelRequest, res: VercelResponse) {
-  const client = getClientForReq(req);
   const hasServiceAccount = !!process.env.FIREBASE_SERVICE_ACCOUNT;
   const hasServerKey = !!process.env.FIREBASE_SERVER_KEY;
   const isAdminInitialized = getApps().length > 0;
 
-  const { count: tokenCount, error } = await client
+  const { count: tokenCount, error } = await supabaseAdmin
     .from('push_tokens')
     .select('*', { count: 'exact', head: true });
 
@@ -623,8 +650,11 @@ async function handlePushStatus(req: VercelRequest, res: VercelResponse) {
   });
 }
 
+/**
+ * Handles pushing notifications (broadcast or targeted)
+ * Persists 100% to Supabase (notification_history and notifications) via supabaseAdmin.
+ */
 async function handlePush(req: VercelRequest, res: VercelResponse) {
-  const client = getClientForReq(req);
   const { title, body, userIds, userId, type, sendInApp, skipPush = false, data } = req.body || {};
   
   let targetUserIds: string[] = [];
@@ -646,12 +676,14 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
 
   const nowIso = new Date().toISOString();
   const broadcastId = randomUUID();
+  const finalTitle = title || 'Notificação';
+  const finalBody = body || '';
 
-  // 1. Create broadcast history record in local persistent store first
+  // 1. Create broadcast history record in Supabase public.notification_history
   const historyItem: HistoryItem = {
     id: broadcastId,
-    title: title || 'Notification',
-    body: body || '',
+    title: finalTitle,
+    body: finalBody,
     target_count: targetUserIds.length,
     read_count: 0,
     status: 'sent',
@@ -659,62 +691,17 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
     created_at: nowIso
   };
 
-  try {
-    const existingHistory = loadHistory();
-    saveHistory([historyItem, ...existingHistory]);
-  } catch (storeHistErr) {
-    console.warn('[Notifications Storage] Error saving history item:', storeHistErr);
-  }
+  await insertHistoryResilient(historyItem);
 
-  // Attempt Supabase notification_history insert
-  try {
-    const { error: histErr } = await client
-      .from('notification_history')
-      .insert({
-        id: broadcastId,
-        title: title || 'Notificação',
-        body: body || '',
-        target_count: targetUserIds.length,
-        status: 'sent',
-        type: resolvedType,
-        created_at: nowIso
-      });
-
-    if (histErr) {
-      console.warn('[Notifications API] Notice inserting into notification_history:', histErr.message);
-      // Retry with minimal columns without custom ID in case default id generation or column mismatch
-      const fallbackPayload: any = {
-        title: title || 'Notificação',
-        body: body || '',
-        target_count: targetUserIds.length,
-        status: 'sent',
-        type: resolvedType
-      };
-
-      const { error: retryErr } = await client
-        .from('notification_history')
-        .insert(fallbackPayload);
-
-      if (retryErr && client !== supabaseAnonClient) {
-        await supabaseAnonClient
-          .from('notification_history')
-          .insert(fallbackPayload);
-      }
-    }
-  } catch (histEx: any) {
-    console.warn('[Notifications API] Exception inserting notification_history:', histEx?.message || histEx);
-  }
-
-  // 2. Create internal notifications for each user linked to broadcastId (if not push-only)
+  // 2. Create in-app notifications for each user in Supabase public.notifications (if not push-only)
   if (resolvedType !== 'push') {
-    // A. Always save to local persistent notifications store so user is NEVER left without in-app notification
-    const internalItems: InternalNotificationItem[] = targetUserIds.map(uid => ({
+    const internalItems = targetUserIds.map(uid => ({
       id: randomUUID(),
       user_id: uid,
       broadcast_id: broadcastId,
-      title: title || 'Notification',
-      body: body || '',
-      message: body || '',
+      title: finalTitle,
+      body: finalBody,
+      message: finalBody, // Retain duplicate 'message' column for backward compatibility
       is_read: false,
       read: false,
       created_at: nowIso,
@@ -722,72 +709,7 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
       data: data || {}
     }));
 
-    try {
-      const existingNotifs = loadInternalNotifications();
-      saveInternalNotifications([...internalItems, ...existingNotifs]);
-    } catch (storeNotifErr) {
-      console.warn('[Notifications Storage] Error saving internal items:', storeNotifErr);
-    }
-
-    // B. Also attempt to insert into Supabase notifications table
-    try {
-      const CHUNK_SIZE = 100;
-      for (let i = 0; i < targetUserIds.length; i += CHUNK_SIZE) {
-        const chunk = targetUserIds.slice(i, i + CHUNK_SIZE);
-        
-        // Attempt with broadcast_id first
-        const richRows = chunk.map(uid => {
-          const matching = internalItems.find(it => it.user_id === uid);
-          return {
-            id: matching?.id || randomUUID(),
-            user_id: uid,
-            broadcast_id: broadcastId,
-            title: title || 'Notification',
-            body: body || '',
-            is_read: false,
-            created_at: nowIso
-          };
-        });
-
-        const { error: richErr } = await client
-          .from('notifications')
-          .insert(richRows);
-
-        if (richErr) {
-          // Fallback to strict standard schema
-          const standardRows = chunk.map(uid => {
-            const matching = internalItems.find(it => it.user_id === uid);
-            return {
-              id: matching?.id || randomUUID(),
-              user_id: uid,
-              title: title || 'Notification',
-              body: body || '',
-              is_read: false,
-              created_at: nowIso
-            };
-          });
-
-          const { error: stdErr } = await client
-            .from('notifications')
-            .insert(standardRows);
-
-          if (stdErr) {
-            console.warn('[Notifications API] Retry with minimal payload:', stdErr.message);
-            const minimalRows = chunk.map(uid => ({
-              user_id: uid,
-              title: title || 'Notification',
-              body: body || ''
-            }));
-            await client.from('notifications').insert(minimalRows);
-            if (client !== supabaseAnonClient) {
-              await supabaseAnonClient.from('notifications').insert(minimalRows);
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('[Notifications API] Exception during notification insert:', err);
-    }
+    await insertNotificationsResilient(internalItems);
   }
     
   // 3. Send background push if not skipped and not only in_app
@@ -798,7 +720,7 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
       broadcastId,
       url: data?.url || '/'
     };
-    pushResult = await sendPushNotification(targetUserIds, title || 'Notification', body || '', customData, client);
+    pushResult = await sendPushNotification(targetUserIds, finalTitle, finalBody, customData, supabaseAdmin);
   }
 
   return res.status(200).json({ 
@@ -810,28 +732,28 @@ async function handlePush(req: VercelRequest, res: VercelResponse) {
   });
 }
 
+/**
+ * Handles notifying administrators for system alerts (e.g. new comments, questions, purchases)
+ */
 async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
-  const client = getClientForReq(req);
   const { title, body, data } = req.body || {};
   
   console.log('🔔 [Notifications API] handleNotifyAdmin recebido:', { title, body, data });
 
-  // 1. Find all admins
+  // 1. Identify all admins via supabaseAdmin
   let adminIds: string[] = [];
   let adminEmails: string[] = [];
 
   try {
-    // Primary: Profiles explicitly marked as admin (using standard schema columns)
     let profiles: any[] | null = null;
-    const { data: pData, error: pErr } = await client
+    const { data: pData, error: pErr } = await supabaseAdmin
       .from('profiles')
       .select('id, email, is_admin');
     
     if (!pErr && pData) {
       profiles = pData;
     } else {
-      // Fallback: select id and email
-      const { data: fallbackProfiles } = await client
+      const { data: fallbackProfiles } = await supabaseAdmin
         .from('profiles')
         .select('id, email');
       profiles = fallbackProfiles || [];
@@ -847,19 +769,17 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
     }
 
     // Secondary: Master admin from settings
-    const { data: settings } = await client
+    const { data: settings } = await supabaseAdmin
       .from('app_settings')
       .select('admin_email')
       .limit(1)
       .maybeSingle();
     
-    // Master fallback emails
     const masterEmails = ['gabrielchendes@gmail.com'];
     if (settings?.admin_email) {
       masterEmails.push(settings.admin_email.toLowerCase());
     }
 
-    // Find by email in profiles if not marked explicitly
     if (profiles && profiles.length > 0) {
       profiles.forEach(p => {
         if (p.email && masterEmails.includes(p.email.toLowerCase())) {
@@ -869,7 +789,7 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // If still no admin IDs found, try fetching from auth.users
+    // Tertiary: Check auth.users if admin profiles were empty
     if (adminIds.length === 0) {
       try {
         const { data: authData } = await supabaseAdmin.auth.admin.listUsers();
@@ -893,7 +813,7 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
   adminIds = [...new Set(adminIds.filter(id => !!id))];
   adminEmails = [...new Set(adminEmails.map(e => e.toLowerCase()))];
 
-  console.log('👥 [Notifications API] Admins identificados para push:', { count: adminIds.length, emails: adminEmails });
+  console.log('👥 [Notifications API] Admins identificados para alerta:', { count: adminIds.length, emails: adminEmails });
 
   if (adminIds.length === 0) {
     return res.status(200).json({ success: true, message: 'Nenhum administrador encontrado para notificar.' });
@@ -901,47 +821,27 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
 
   if (adminIds.length > 20) adminIds = adminIds.slice(0, 20);
 
-  const finalTitle = title || 'New Activity in the App';
-  const finalBody = body || 'There is a new development that requires your attention.';
+  const finalTitle = title || 'Nova Notificação Administrativa';
+  const finalBody = body || 'Há uma nova atividade no aplicativo que requer sua atenção.';
   const nowIso = new Date().toISOString();
   const broadcastId = randomUUID();
 
-  // 1. Log in notification_history (persistent store + Supabase) so Admin can track in Central de Notificações
-  try {
-    const adminHistoryItem: HistoryItem = {
-      id: broadcastId,
-      title: finalTitle,
-      body: finalBody,
-      target_count: adminIds.length,
-      read_count: 0,
-      status: 'sent',
-      type: 'both',
-      created_at: nowIso
-    };
-    const prevH = loadHistory();
-    saveHistory([adminHistoryItem, ...prevH]);
-  } catch (storeH) {
-    console.warn('[Notifications Storage] Error saving admin history item:', storeH);
-  }
+  // 1. Log in Supabase notification_history using supabaseAdmin
+  const adminHistoryItem: HistoryItem = {
+    id: broadcastId,
+    title: finalTitle,
+    body: finalBody,
+    target_count: adminIds.length,
+    read_count: 0,
+    status: 'sent',
+    type: 'both',
+    created_at: nowIso
+  };
 
-  try {
-    await client
-      .from('notification_history')
-      .insert({
-        id: broadcastId,
-        title: finalTitle,
-        body: finalBody,
-        target_count: adminIds.length,
-        status: 'sent',
-        type: 'both',
-        created_at: nowIso
-      });
-  } catch (hEx) {
-    console.warn('[Notifications API] Exception recording notifyAdmin in notification_history:', hEx);
-  }
+  await insertHistoryResilient(adminHistoryItem);
 
-  // 2. Create notifications for each admin (Internal bell) in persistent store and Supabase
-  const adminNotifs: InternalNotificationItem[] = adminIds.map(uid => ({
+  // 2. Create in-app notifications for each admin in Supabase public.notifications
+  const adminNotifs = adminIds.map(uid => ({
     id: randomUUID(),
     user_id: uid,
     broadcast_id: broadcastId,
@@ -955,65 +855,7 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
     data: data || {}
   }));
 
-  try {
-    const prevNotifs = loadInternalNotifications();
-    saveInternalNotifications([...adminNotifs, ...prevNotifs]);
-  } catch (storeN) {
-    console.warn('[Notifications Storage] Error saving admin notifs:', storeN);
-  }
-
-  try {
-    const richRows = adminIds.map(uid => {
-      const match = adminNotifs.find(it => it.user_id === uid);
-      return {
-        id: match?.id || randomUUID(),
-        user_id: uid,
-        broadcast_id: broadcastId,
-        title: finalTitle,
-        body: finalBody,
-        is_read: false,
-        created_at: nowIso
-      };
-    });
-
-    const { error: insertError } = await client
-      .from('notifications')
-      .insert(richRows);
-
-    if (insertError) {
-      // Fallback without broadcast_id
-      const stdRows = adminIds.map(uid => {
-        const match = adminNotifs.find(it => it.user_id === uid);
-        return {
-          id: match?.id || randomUUID(),
-          user_id: uid,
-          title: finalTitle,
-          body: finalBody,
-          is_read: false,
-          created_at: nowIso
-        };
-      });
-
-      const { error: stdErr } = await client
-        .from('notifications')
-        .insert(stdRows);
-
-      if (stdErr) {
-        // Final fallback with minimal payload
-        const minRows = adminIds.map(uid => ({
-          user_id: uid,
-          title: finalTitle,
-          body: finalBody
-        }));
-        await client.from('notifications').insert(minRows);
-        if (client !== supabaseAnonClient) {
-          await supabaseAnonClient.from('notifications').insert(minRows);
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[Notifications API] Exception inserting admin notifications:', err);
-  }
+  await insertNotificationsResilient(adminNotifs);
 
   // 3. Send Push Notification to admins with direct routing URL
   const pushPayloadData = {
@@ -1030,7 +872,7 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
       finalTitle, 
       finalBody, 
       pushPayloadData,
-      client
+      supabaseAdmin
     );
     console.log('🚀 [Notifications API] Resultado do envio Push para admins:', pushResult);
   } catch (err) {
@@ -1046,13 +888,16 @@ async function handleNotifyAdmin(req: VercelRequest, res: VercelResponse) {
   });
 }
 
+/**
+ * Handles fetching broadcast and notification history directly from Supabase.
+ * Aggregates live read and target counts from public.notifications.
+ */
 async function handleHistory(req: VercelRequest, res: VercelResponse) {
-  const client = getClientForReq(req);
   try {
-    // 1. Fetch from notification_history table and local persistent history store
+    // 1. Fetch from notification_history table using supabaseAdmin
     let historyList: any[] = [];
     try {
-      const { data: hist, error: histErr } = await client
+      const { data: hist, error: histErr } = await supabaseAdmin
         .from('notification_history')
         .select('*')
         .order('created_at', { ascending: false })
@@ -1060,26 +905,17 @@ async function handleHistory(req: VercelRequest, res: VercelResponse) {
 
       if (!histErr && hist) {
         historyList = hist;
+      } else if (histErr) {
+        console.warn('[Notifications API] notification_history query warning:', histErr.message);
       }
     } catch (hErr) {
-      console.warn('[Notifications API] notification_history query warning:', hErr);
+      console.warn('[Notifications API] notification_history query exception:', hErr);
     }
 
-    // Merge persistent local history items
-    try {
-      const localH = loadHistory();
-      const hMap = new Map<string, any>();
-      localH.forEach(item => hMap.set(item.id, item));
-      historyList.forEach(item => hMap.set(item.id, { ...(hMap.get(item.id) || {}), ...item }));
-      historyList = Array.from(hMap.values());
-    } catch (localHErr) {
-      console.warn('[Notifications Storage] Warning merging local history:', localHErr);
-    }
-
-    // 2. Fetch notifications from notifications table + local store (for live read counts and recovery)
+    // 2. Fetch notifications from public.notifications using supabaseAdmin for live read stats
     let allNotifications: any[] = [];
     try {
-      const { data: notifs, error: notifErr } = await client
+      const { data: notifs, error: notifErr } = await supabaseAdmin
         .from('notifications')
         .select('id, user_id, broadcast_id, title, body, message, is_read, read, read_at, created_at')
         .order('created_at', { ascending: false })
@@ -1087,20 +923,11 @@ async function handleHistory(req: VercelRequest, res: VercelResponse) {
 
       if (!notifErr && notifs) {
         allNotifications = notifs;
+      } else if (notifErr) {
+        console.warn('[Notifications API] notifications query warning:', notifErr.message);
       }
     } catch (nErr) {
-      console.warn('[Notifications API] notifications query warning:', nErr);
-    }
-
-    // Merge persistent local notifications
-    try {
-      const localN = loadInternalNotifications();
-      const nMap = new Map<string, any>();
-      localN.forEach(item => nMap.set(item.id, item));
-      allNotifications.forEach(item => nMap.set(item.id, { ...(nMap.get(item.id) || {}), ...item }));
-      allNotifications = Array.from(nMap.values());
-    } catch (localNErr) {
-      console.warn('[Notifications Storage] Warning merging local notifications:', localNErr);
+      console.warn('[Notifications API] notifications query exception:', nErr);
     }
 
     // 3. Group notifications by broadcast_id and unlinked title+timestamp bucket
@@ -1109,7 +936,7 @@ async function handleHistory(req: VercelRequest, res: VercelResponse) {
 
     allNotifications.forEach((n: any) => {
       const isRead = Boolean(n.is_read || n.read || n.read_at);
-      const notifTitle = n.title || 'Notification';
+      const notifTitle = n.title || 'Notificação';
       const notifBody = n.body || n.message || '';
       const notifDate = n.created_at || new Date().toISOString();
 
@@ -1128,7 +955,7 @@ async function handleHistory(req: VercelRequest, res: VercelResponse) {
         if (isRead) broadcastStats[n.broadcast_id].read_count += 1;
         broadcastStats[n.broadcast_id].ids.push(n.id);
       } else {
-        // Group unlinked notifications in 30-minute buckets to keep related notifications together
+        // Group unlinked individual notifications in 30-minute buckets to aggregate statistics cleanly
         const timeBucket = Math.floor(new Date(notifDate).getTime() / (1000 * 60 * 30));
         const snippet = notifBody.trim().substring(0, 30);
         const groupKey = `${notifTitle}___${snippet}___${timeBucket}`;
@@ -1148,7 +975,7 @@ async function handleHistory(req: VercelRequest, res: VercelResponse) {
       }
     });
 
-    // 4. Merge historyList with live counts
+    // 4. Merge historyList with live counts from Supabase
     const historyMap = new Map<string, any>();
 
     historyList.forEach((item: any) => {
@@ -1163,7 +990,7 @@ async function handleHistory(req: VercelRequest, res: VercelResponse) {
       });
     });
 
-    // 5. Synthesize entries from broadcastStats that are not in historyMap
+    // 5. Synthesize entries from broadcastStats that are in notifications but missing in history table
     Object.entries(broadcastStats).forEach(([bId, stats]) => {
       if (!historyMap.has(bId)) {
         historyMap.set(bId, {
@@ -1179,7 +1006,7 @@ async function handleHistory(req: VercelRequest, res: VercelResponse) {
       }
     });
 
-    // 6. Synthesize entries from unlinkedGroups (e.g. past individual lesson answers or community notifications)
+    // 6. Synthesize entries from unlinked groups
     Object.entries(unlinkedGroups).forEach(([key, group]) => {
       const alreadyCovered = Array.from(historyMap.values()).some((h: any) => 
         h.title === group.title && Math.abs(new Date(h.created_at || h.sent_at).getTime() - new Date(group.created_at).getTime()) < 1000 * 60 * 30
@@ -1206,24 +1033,15 @@ async function handleHistory(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json(result);
   } catch (err: any) {
     console.error('[Notifications API] Exception in handleHistory:', err);
-    return res.status(200).json(loadHistory());
+    return res.status(500).json({ error: err?.message || 'Error fetching history' });
   }
 }
 
 async function handleClear(req: VercelRequest, res: VercelResponse) {
-  const client = getClientForReq(req);
   try {
-    // Clear local persistent stores
+    // Delete all broadcast notifications and history directly from Supabase via supabaseAdmin
     try {
-      saveInternalNotifications([]);
-      saveHistory([]);
-    } catch (clearStoreErr) {
-      console.warn('[Notifications Storage] Error clearing local store:', clearStoreErr);
-    }
-
-    // Delete notifications associated with broadcasts or all general notifications
-    try {
-      await client
+      await supabaseAdmin
         .from('notifications')
         .delete()
         .not('broadcast_id', 'is', null);
@@ -1232,7 +1050,7 @@ async function handleClear(req: VercelRequest, res: VercelResponse) {
     }
 
     try {
-      await client
+      await supabaseAdmin
         .from('notification_history')
         .delete()
         .neq('id', '00000000-0000-0000-0000-000000000000');
@@ -1246,139 +1064,136 @@ async function handleClear(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+/**
+ * Handles fetching in-app notifications for a specific user.
+ * Directly queries public.notifications in Supabase with RLS bypass via supabaseAdmin,
+ * returning the list ordered by created_at DESC (limit 50) and unreadCount.
+ */
 async function handleUserNotifications(req: VercelRequest, res: VercelResponse) {
-  const client = getClientForReq(req);
   const targetUserId = (req.query?.userId as string) || (req.body?.userId as string);
   
   if (!targetUserId) {
     return res.status(400).json({ error: 'userId is required' });
   }
 
-  // 1. Query Supabase
-  let sbItems: any[] = [];
   try {
-    const { data, error } = await client
+    const { data, error } = await supabaseAdmin
       .from('notifications')
       .select('*')
       .eq('user_id', targetUserId)
       .order('created_at', { ascending: false })
       .limit(50);
-    if (!error && Array.isArray(data)) {
-      sbItems = data;
-    }
-  } catch (e) {
-    console.warn('[Notifications API] Supabase user-notifications query notice:', e);
-  }
 
-  // 2. Query persistent local store
-  const localItems = loadInternalNotifications().filter(it => it.user_id === targetUserId);
-
-  // 3. Merge and deduplicate by id
-  const map = new Map<string, any>();
-  localItems.forEach(it => {
-    map.set(it.id, it);
-  });
-  sbItems.forEach(it => {
-    if (map.has(it.id)) {
-      const prev = map.get(it.id);
-      map.set(it.id, {
-        ...prev,
-        ...it,
-        is_read: prev.is_read || it.is_read || it.read || false,
-        read: prev.read || it.read || it.is_read || false
+    if (error) {
+      console.error('[Notifications API] Supabase user-notifications query error:', error.message);
+      return res.status(500).json({ 
+        error: error.message, 
+        notifications: [], 
+        unreadCount: 0 
       });
-    } else {
-      map.set(it.id, it);
     }
-  });
 
-  const merged = Array.from(map.values()).sort((a, b) => {
-    const tA = new Date(a.created_at || 0).getTime();
-    const tB = new Date(b.created_at || 0).getTime();
-    return tB - tA;
-  });
+    const notifications = (data || []).map((row: any) => {
+      const isRead = Boolean(row.is_read || row.read || row.read_at);
+      const bodyContent = row.body || row.message || '';
+      return {
+        ...row,
+        body: bodyContent,
+        message: bodyContent,
+        is_read: isRead,
+        read: isRead
+      };
+    });
 
-  return res.status(200).json({
-    success: true,
-    notifications: merged,
-    unreadCount: merged.filter(n => !n.is_read && !n.read).length
-  });
+    const unreadCount = notifications.filter(n => !n.is_read && !n.read).length;
+
+    return res.status(200).json({
+      success: true,
+      notifications,
+      unreadCount
+    });
+  } catch (err: any) {
+    console.error('[Notifications API] Exception in handleUserNotifications:', err);
+    return res.status(500).json({ 
+      error: err?.message || 'Error fetching notifications', 
+      notifications: [], 
+      unreadCount: 0 
+    });
+  }
 }
 
+/**
+ * Marks a single notification as read in Supabase public.notifications
+ */
 async function handleMarkRead(req: VercelRequest, res: VercelResponse) {
-  const client = getClientForReq(req);
   const { id, userId } = req.body || {};
   if (!id) return res.status(400).json({ error: 'Missing notification id' });
 
   const now = new Date().toISOString();
 
-  // 1. Update in local store
   try {
-    const local = loadInternalNotifications();
-    let updated = false;
-    const newLocal = local.map(item => {
-      if (item.id === id) {
-        updated = true;
-        return { ...item, is_read: true, read: true, read_at: now };
-      }
-      return item;
-    });
-    if (updated) {
-      saveInternalNotifications(newLocal);
-    }
-  } catch (e) {}
-
-  // 2. Update in Supabase
-  try {
-    await client
+    let query = supabaseAdmin
       .from('notifications')
       .update({ is_read: true, read: true, read_at: now })
       .eq('id', id);
-  } catch (e) {}
 
-  return res.status(200).json({ success: true, id });
+    if (userId) {
+      query = query.eq('user_id', userId);
+    }
+
+    const { error } = await query;
+    if (error) {
+      console.warn('[Notifications API] Fallback update with minimal payload:', error.message);
+      await supabaseAdmin
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('id', id);
+    }
+
+    return res.status(200).json({ success: true, id });
+  } catch (err: any) {
+    console.error('[Notifications API] Error marking notification as read:', err);
+    return res.status(500).json({ error: err?.message || 'Error updating notification' });
+  }
 }
 
+/**
+ * Marks all notifications for a given user as read in Supabase public.notifications
+ */
 async function handleMarkAllRead(req: VercelRequest, res: VercelResponse) {
-  const client = getClientForReq(req);
   const { userId } = req.body || {};
   if (!userId) return res.status(400).json({ error: 'Missing userId' });
 
   const now = new Date().toISOString();
 
-  // 1. Update in local store
   try {
-    const local = loadInternalNotifications();
-    const newLocal = local.map(item => {
-      if (item.user_id === userId) {
-        return { ...item, is_read: true, read: true, read_at: now };
-      }
-      return item;
-    });
-    saveInternalNotifications(newLocal);
-  } catch (e) {}
-
-  // 2. Update in Supabase
-  try {
-    await client
+    const { error } = await supabaseAdmin
       .from('notifications')
       .update({ is_read: true, read: true, read_at: now })
-      .eq('user_id', userId)
-      .or('is_read.eq.false,is_read.is.null');
-  } catch (e) {}
+      .eq('user_id', userId);
 
-  return res.status(200).json({ success: true });
+    if (error) {
+      console.warn('[Notifications API] Fallback mark all read with minimal payload:', error.message);
+      await supabaseAdmin
+        .from('notifications')
+        .update({ is_read: true })
+        .eq('user_id', userId);
+    }
+
+    return res.status(200).json({ success: true });
+  } catch (err: any) {
+    console.error('[Notifications API] Error marking all notifications as read:', err);
+    return res.status(500).json({ error: err?.message || 'Error updating notifications' });
+  }
 }
 
 async function handleSubTopic(req: VercelRequest, res: VercelResponse) {
-  const client = getClientForReq(req);
   const { userId, token, topic = 'all' } = req.body;
   if (!token) return res.status(400).json({ error: 'Missing token parameter' });
   
-  // Register or update token in database
   if (userId) {
     try {
-      await client.from('push_tokens').upsert({
+      await supabaseAdmin.from('push_tokens').upsert({
         user_id: userId,
         token: token,
         platform: 'web'
@@ -1402,16 +1217,15 @@ async function handleSubTopic(req: VercelRequest, res: VercelResponse) {
 }
 
 async function handleDetails(req: VercelRequest, res: VercelResponse, id: string) {
-  const client = getClientForReq(req);
   if (!id) return res.status(400).json({ error: 'Missing broadcast id parameter' });
   
   try {
     let notificationsData: any[] = [];
     
-    // 1. Attempt lookup by broadcast_id
-    const { data: bData, error: bErr } = await client
+    // 1. Lookup by broadcast_id via supabaseAdmin
+    const { data: bData, error: bErr } = await supabaseAdmin
       .from('notifications')
-      .select('id, user_id, is_read, read, read_at, created_at, title, body')
+      .select('id, user_id, is_read, read, read_at, created_at, title, body, message')
       .eq('broadcast_id', id)
       .order('created_at', { ascending: false });
 
@@ -1419,15 +1233,15 @@ async function handleDetails(req: VercelRequest, res: VercelResponse, id: string
       notificationsData = bData;
     }
 
-    // 2. Attempt lookup by synthetic group key `group_Title___timeBucket`
+    // 2. Lookup by synthetic group key `group_Title___timeBucket`
     if (notificationsData.length === 0 && id.startsWith('group_')) {
       const raw = id.replace('group_', '');
       const parts = raw.split('___');
       const title = parts[0];
       
-      const { data: gData } = await client
+      const { data: gData } = await supabaseAdmin
         .from('notifications')
-        .select('id, user_id, is_read, read, read_at, created_at, title, body')
+        .select('id, user_id, is_read, read, read_at, created_at, title, body, message')
         .eq('title', title)
         .order('created_at', { ascending: false });
 
@@ -1436,19 +1250,19 @@ async function handleDetails(req: VercelRequest, res: VercelResponse, id: string
       }
     }
 
-    // 3. Attempt lookup via notification_history title matching
+    // 3. Lookup via notification_history title matching
     if (notificationsData.length === 0) {
       try {
-        const { data: histRecord } = await client
+        const { data: histRecord } = await supabaseAdmin
           .from('notification_history')
           .select('title, created_at')
           .eq('id', id)
           .single();
 
         if (histRecord?.title) {
-          const { data: tData } = await client
+          const { data: tData } = await supabaseAdmin
             .from('notifications')
-            .select('id, user_id, is_read, read, read_at, created_at, title, body')
+            .select('id, user_id, is_read, read, read_at, created_at, title, body, message')
             .eq('title', histRecord.title)
             .order('created_at', { ascending: false });
 
@@ -1459,11 +1273,11 @@ async function handleDetails(req: VercelRequest, res: VercelResponse, id: string
       } catch (hEx) {}
     }
 
-    // 4. Attempt lookup by single notification ID
+    // 4. Lookup by single notification ID
     if (notificationsData.length === 0) {
-      const { data: directData } = await client
+      const { data: directData } = await supabaseAdmin
         .from('notifications')
-        .select('id, user_id, is_read, read, read_at, created_at, title, body')
+        .select('id, user_id, is_read, read, read_at, created_at, title, body, message')
         .eq('id', id);
 
       if (directData && directData.length > 0) {
@@ -1471,22 +1285,11 @@ async function handleDetails(req: VercelRequest, res: VercelResponse, id: string
       }
     }
 
-    // 4b. Attempt lookup in persistent local store
-    if (notificationsData.length === 0) {
-      try {
-        const local = loadInternalNotifications();
-        const matchingLocal = local.filter(it => it.broadcast_id === id || it.id === id);
-        if (matchingLocal.length > 0) {
-          notificationsData = matchingLocal;
-        }
-      } catch (e) {}
-    }
-
     if (notificationsData.length === 0) {
       return res.status(200).json([]);
     }
 
-    // 5. Fetch profiles for all unique user_ids
+    // 5. Fetch profiles for all unique user_ids via supabaseAdmin
     const userIds = [...new Set(notificationsData.map(n => n.user_id).filter(Boolean))];
     const profilesMap: Record<string, any> = {};
 
@@ -1495,7 +1298,7 @@ async function handleDetails(req: VercelRequest, res: VercelResponse, id: string
       for (let i = 0; i < userIds.length; i += CHUNK_SIZE) {
         const chunk = userIds.slice(i, i + CHUNK_SIZE);
         try {
-          const { data: profiles } = await client
+          const { data: profiles } = await supabaseAdmin
             .from('profiles')
             .select('id, full_name, email, avatar_url')
             .in('id', chunk);
@@ -1511,7 +1314,7 @@ async function handleDetails(req: VercelRequest, res: VercelResponse, id: string
       }
     }
 
-    // 6. Merge profiles and format response with complete read information
+    // 6. Merge profiles and format response
     const formatted = notificationsData.map((row: any) => {
       const isRead = Boolean(row.is_read || row.read || row.read_at);
       const profile = profilesMap[row.user_id];
@@ -1523,15 +1326,14 @@ async function handleDetails(req: VercelRequest, res: VercelResponse, id: string
         read_at: row.read_at || (isRead ? row.created_at : null),
         created_at: row.created_at,
         profiles: profile || { 
-          id: row.user_id,
+          id: row.user_id, 
           full_name: 'Usuário', 
-          email: 'N/A',
-          avatar_url: null
+          email: 'N/A', 
+          avatar_url: null 
         }
       };
     });
 
-    // 7. Sort: Read users first (with read timestamp), then alphabetical by name
     formatted.sort((a, b) => {
       if (a.is_read && !b.is_read) return -1;
       if (!a.is_read && b.is_read) return 1;
@@ -1544,4 +1346,3 @@ async function handleDetails(req: VercelRequest, res: VercelResponse, id: string
     return res.status(200).json([]);
   }
 }
-
